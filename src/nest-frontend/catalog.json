@@ -1,0 +1,11 @@
+{
+    "games": [
+        {
+            "id": "hungry-hatchling",
+            "title": "Hungry Hatchling",
+            "short_description": "Arcade Action Puzzle Game about a hungry mutated bird-snake.",
+            "current_version": "1.0.0",
+            "icon_url": "https://cdn.gamebird.games/api/images/hungry-hatchling-icon.png"
+        }
+    ]
+}
