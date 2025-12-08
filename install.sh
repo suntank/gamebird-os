@@ -3,27 +3,81 @@ set -e
 
 # Paths
 REPO_DIR="/home/pi/gamebird-os"
+SRC_DIR="$REPO_DIR/src"
 TARGET_SETTINGS_DIR="/home/pi/gamebird/settings"
+TARGET_OVERLAY_DIR="/home/pi/scripts/gbz_overlay"
 LOG_FILE="$REPO_DIR/install.log"
 
 echo "=== Game Bird Installer ===" | tee -a "$LOG_FILE"
 echo "Started: $(date)" | tee -a "$LOG_FILE"
 
-# 1. Copy settings
-if [ -d "$REPO_DIR/settings" ]; then
-    echo "Copying settings..." | tee -a "$LOG_FILE"
-    for file in "$REPO_DIR/settings/"*.sh; do
-        target="$TARGET_SETTINGS_DIR/$(basename "$file")"
-        if ! cmp -s "$file" "$target"; then
-            echo "Installing updated: $(basename "$file")" | tee -a "$LOG_FILE"
+# Ensure target directories exist
+mkdir -p "$TARGET_SETTINGS_DIR"
+mkdir -p "$TARGET_OVERLAY_DIR"
+
+# 1. Copy src files to settings (except overlay.py)
+if [ -d "$SRC_DIR" ]; then
+    echo "Copying src files to settings..." | tee -a "$LOG_FILE"
+    for file in "$SRC_DIR"/*; do
+        # Skip directories and overlay.py
+        [ -d "$file" ] && continue
+        filename=$(basename "$file")
+        [ "$filename" = "overlay.py" ] && continue
+        
+        target="$TARGET_SETTINGS_DIR/$filename"
+        
+        # Only copy if source is newer, different size, or target doesn't exist
+        if [ ! -f "$target" ] || [ "$file" -nt "$target" ] || [ "$(stat -c%s "$file")" != "$(stat -c%s "$target")" ]; then
+            echo "Installing: $filename" | tee -a "$LOG_FILE"
             cp "$file" "$target"
-            chmod +x "$target"
+            # Make shell scripts executable
+            [[ "$filename" == *.sh ]] && chmod +x "$target"
         else
-            echo "Unchanged: $(basename "$file")" | tee -a "$LOG_FILE"
+            echo "Up to date: $filename" | tee -a "$LOG_FILE"
         fi
     done
 else
-    echo "No settings to install." | tee -a "$LOG_FILE"
+    echo "No src directory found." | tee -a "$LOG_FILE"
+fi
+
+# 2. Copy nest-frontend directory to settings
+NEST_SRC="$SRC_DIR/nest-frontend"
+NEST_TARGET="$TARGET_SETTINGS_DIR/nest-frontend"
+if [ -d "$NEST_SRC" ]; then
+    echo "Copying nest-frontend..." | tee -a "$LOG_FILE"
+    # Use find to iterate all files recursively
+    find "$NEST_SRC" -type f | while read -r file; do
+        # Get relative path from nest-frontend
+        rel_path="${file#$NEST_SRC/}"
+        target="$NEST_TARGET/$rel_path"
+        target_dir=$(dirname "$target")
+        
+        # Create target directory if needed
+        mkdir -p "$target_dir"
+        
+        # Only copy if source is newer, different size, or target doesn't exist
+        if [ ! -f "$target" ] || [ "$file" -nt "$target" ] || [ "$(stat -c%s "$file")" != "$(stat -c%s "$target")" ]; then
+            echo "Installing: nest-frontend/$rel_path" | tee -a "$LOG_FILE"
+            cp "$file" "$target"
+        else
+            echo "Up to date: nest-frontend/$rel_path" | tee -a "$LOG_FILE"
+        fi
+    done
+else
+    echo "nest-frontend not found." | tee -a "$LOG_FILE"
+fi
+
+# 3. Copy overlay.py to gbz_overlay
+if [ -f "$SRC_DIR/overlay.py" ]; then
+    target="$TARGET_OVERLAY_DIR/overlay.py"
+    if [ ! -f "$target" ] || [ "$SRC_DIR/overlay.py" -nt "$target" ] || [ "$(stat -c%s "$SRC_DIR/overlay.py")" != "$(stat -c%s "$target")" ]; then
+        echo "Installing: overlay.py -> $TARGET_OVERLAY_DIR" | tee -a "$LOG_FILE"
+        cp "$SRC_DIR/overlay.py" "$target"
+    else
+        echo "Up to date: overlay.py" | tee -a "$LOG_FILE"
+    fi
+else
+    echo "overlay.py not found in src." | tee -a "$LOG_FILE"
 fi
 
 # # 2. Copy service files EXAMPLE
