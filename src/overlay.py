@@ -152,7 +152,7 @@ from adafruit_ina219 import INA219
 i2c   = busio.I2C(board.SCL, board.SDA)
 ina   = INA219(i2c, addr=0x43)
 
-vmax = {"discharging": 4.0,  "charging": 4.2}
+vmax = {"discharging": 4.0,  "charging": 4.3}
 vmin = {"discharging": 3.3,  "charging": 3.9}
 icons = { "discharging": [ "alert_red","alert","20","30","30","50","60",
                            "60","80","90","90","full" ],
