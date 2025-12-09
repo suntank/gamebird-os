@@ -155,10 +155,10 @@ ina   = INA219(i2c, addr=0x43)
 vmax = {"discharging": 4.0,  "charging": 4.2}
 vmin = {"discharging": 3.3,  "charging": 3.9}
 icons = { "discharging": [ "alert_red","alert","20","30","30","50","60",
-                           "60","80","90","full","full" ],
+                           "60","80","90","90","full" ],
           "charging":    [ "charging_20","charging_30","charging_30","charging_30",
                            "charging_50","charging_50","charging_60","charging_60",
-                           "charging_80","charging_90","charging_full","charging_full" ]}
+                           "charging_80","charging_90","charging_90","charging_full" ]}
 
 # Mixer to control (amixer scontrols will list options)
 
@@ -345,20 +345,21 @@ def battery(force=False):
         charging = False
 
     # Conditions where battery should stay on:
-    #  - red level while discharging (alert_red)
-    #  - fully charged while charging (charging_full)
+    #  - red level while discharging (alert_red) - always visible
     #  - START button held
     always_on = False
 
     if not charging and level_icon == "alert_red":
         always_on = True
 
-    if charging and level_icon in ("charging_full",):
-        always_on = True
-
     # START held keeps battery visible
     if start_held:
         always_on = True
+
+    # Show for 3 seconds when reaching "alert" (second-to-last before red) or "charging_full"
+    if battery_level is not None and level_icon != battery_level:
+        if level_icon == "alert" or level_icon == "charging_full" or level_icon == "20":
+            battery_visible_until = time.time() + 3.0
 
     visible = always_on or (time.time() < battery_visible_until)
 
