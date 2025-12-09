@@ -44,19 +44,29 @@ echo "$NEW_COMMIT" > "$VERSION_FILE"
 send_progress "PCT:40"
 echo "[3/5] Generating changelog..." | tee -a "$LOG_FILE"
 {
-    echo "# Game Bird OS Changelog"
-    echo ""
-    echo "## Recent Updates"
+    echo "# $(date '+%Y-%m-%d %H:%M')"
     echo ""
     if [ "$OLD_COMMIT" != "$NEW_COMMIT" ]; then
-        git log --pretty=format:"- %s" "$OLD_COMMIT".."$NEW_COMMIT"
+        # Get the latest commit's subject and body
+        git log -1 --pretty=format:"## %s" "$NEW_COMMIT"
+        echo ""
+        BODY=$(git log -1 --pretty=format:"%b" "$NEW_COMMIT" | sed '/^$/d')
+        if [ -n "$BODY" ]; then
+            echo "$BODY" | while read -r line; do
+                echo "- $line"
+            done
+        fi
     else
-        git log --pretty=format:"- %s" -10
+        git log -1 --pretty=format:"## %s"
+        echo ""
+        BODY=$(git log -1 --pretty=format:"%b" | sed '/^$/d')
+        if [ -n "$BODY" ]; then
+            echo "$BODY" | while read -r line; do
+                echo "- $line"
+            done
+        fi
     fi
     echo ""
-    echo ""
-    echo "---"
-    echo "Updated: $(date '+%Y-%m-%d %H:%M')"
 } > "$CHANGELOG_FILE"
 
 send_progress "PCT:60"
