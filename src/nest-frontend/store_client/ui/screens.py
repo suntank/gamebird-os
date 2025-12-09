@@ -613,6 +613,11 @@ class GameDetail(Screen):
         
         y += self.ICON_SIZE + 10
         
+        # === AUTHOR ===
+        if self.manifest.author and y > -20 and y < 200:
+            draw_text(surface, self.app.font, f"Author: {self.manifest.author}", 5, y, (200, 200, 200))
+            y += self.LINE_HEIGHT + 4
+        
         # === TAGS ===
         if self.manifest.tags and y > -50 and y < 200:
             tag_text = "Tags: " + ", ".join(self.manifest.tags)
