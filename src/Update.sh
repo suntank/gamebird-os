@@ -8,9 +8,12 @@ CHANGELOG_FILE="/home/pi/gamebird-os/CHANGELOG.md"
 
 PNGVIEW="/usr/local/bin/pngview"
 UPDATE_MSG="/home/pi/gamebird/settings/update_os_msg.png"
-# Show update overlay (layer 19999 = topmost, bottom center)
-$PNGVIEW -d 0 -n -b 0x0000 -l 19999 -x 480 -y 640 $UPDATE_MSG &
-PNG_PID=$!
+PNG_PID=""
+# Show update overlay (layer 19999 = topmost, bottom center) if PNG exists
+if [ -f "$UPDATE_MSG" ]; then
+    $PNGVIEW -d 0 -n -b 0x0000 -l 19999 -x 480 -y 640 "$UPDATE_MSG" &
+    PNG_PID=$!
+fi
 echo "=== Game Bird OS Updater ===" | tee -a "$LOG_FILE"
 echo "Started: $(date)" | tee -a "$LOG_FILE"
 
@@ -59,7 +62,9 @@ chmod +x /home/pi/gamebird/settings/*.sh >> "$LOG_FILE" 2>&1 || true
 echo "[6/6] Rebooting..." | tee -a "$LOG_FILE"
 sleep 2
 
-kill $PNG_PID
-rm "$UPDATE_MSG"
+# Clean up overlay if it was started
+if [ -n "$PNG_PID" ] && kill -0 "$PNG_PID" 2>/dev/null; then
+    kill "$PNG_PID"
+fi
 
 sudo reboot
