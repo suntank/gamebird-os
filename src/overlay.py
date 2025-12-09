@@ -104,12 +104,7 @@ def check_for_git_update():
             ["git", "rev-parse", "HEAD"], cwd="/home/pi/gamebird-os"
         ).decode().strip()
         url = "https://api.github.com/repos/suntank/gamebird-os/commits/main"
-        req = urllib.request.Request(url)
-        # Token should be provided via environment variable for security
-        token = os.environ.get("GAMEBIRD_GITHUB_TOKEN")
-        if token:
-            req.add_header("Authorization", f"token {token}")
-        with urllib.request.urlopen(req) as response:
+        with urllib.request.urlopen(url) as response:
             remote_data = json.loads(response.read())
             remote_head = remote_data["sha"]
             my_logger.info(f"GitHub update check: local={local_head} remote={remote_head}")

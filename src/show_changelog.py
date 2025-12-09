@@ -9,8 +9,8 @@ import pygame
 from pygame.locals import *
 
 SCREEN_WIDTH, SCREEN_HEIGHT = 480, 480
-FONT_SIZE = 22
-TITLE_FONT_SIZE = 28
+FONT_SIZE = 44
+TITLE_FONT_SIZE = 56
 CHANGELOG_PATH = '/home/pi/gamebird-os/CHANGELOG.md'
 
 # Colors (matching nest-frontend style)
