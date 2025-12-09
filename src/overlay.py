@@ -620,8 +620,9 @@ try:
         now = time.time()
         if start_held and start_pressed_at is not None and now - start_pressed_at >= 2.0:
             wifi_always_visible = True
-            # Show time while holding START
-            show_time_osd(position=osd_position)
+            # Show time while holding START (only spawn if not already visible)
+            if 'time' not in overlay_processes:
+                show_time_osd(position=osd_position)
         elif not start_held:
             wifi_always_visible = False
             hide_time_osd()
