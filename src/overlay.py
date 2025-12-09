@@ -285,6 +285,40 @@ def build_volume_png(vol_pct: int, path_out="/tmp/vol_osd.png") -> str:
 
 vol_osd_until = 0.0                                            # epoch seconds
 
+def build_time_png(path_out="/tmp/time_osd.png") -> str:
+    """Build a transparent PNG with current time in 12-hour format."""
+    font_size = int(dpi * 0.7)          # same size as volume percent
+    font = ImageFont.truetype(FONT_PATH, font_size)
+    
+    now = datetime.now()
+    hour_12 = now.hour % 12
+    if hour_12 == 0:
+        hour_12 = 12
+    am_pm = "AM" if now.hour < 12 else "PM"
+    txt = f"{hour_12}:{now.minute:02d} {am_pm}"
+    
+    text_w, text_h = font.getsize(txt)
+    img = Image.new("RGBA", (text_w + 8, text_h + 4), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.text((4, 2), txt, font=font, fill=(255, 255, 255, 255))
+    img.save(path_out)
+    return path_out
+
+def show_time_osd(position='bottom'):
+    """Show current time overlay in the center of the HUD."""
+    png = build_time_png()
+    # Center horizontally
+    img = Image.open(png)
+    x_pos = (int(resolution[0]) - img.width) // 2
+    y_pos = 0 if position == 'top' else int(resolution[1]) - dpi - 8
+    spawn_overlay('time', png, x_pos, y_pos)
+
+def hide_time_osd():
+    """Hide the time overlay."""
+    if 'time' in overlay_processes:
+        overlay_processes['time'].kill()
+        del overlay_processes['time']
+
 def show_volume_osd(vol_pct: int, duration=2.0, position='bottom'):
     """Create PNG plus show via pngview; auto kills after duration."""
     global vol_osd_until
@@ -586,8 +620,11 @@ try:
         now = time.time()
         if start_held and start_pressed_at is not None and now - start_pressed_at >= 2.0:
             wifi_always_visible = True
+            # Show time while holding START
+            show_time_osd(position=osd_position)
         elif not start_held:
             wifi_always_visible = False
+            hide_time_osd()
 
         # Show volume OSD while START is held AND actively changing volume (dpad left/right)
         if start_held and repeat_direction != 0:
