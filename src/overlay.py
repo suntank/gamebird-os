@@ -588,8 +588,8 @@ try:
         elif not start_held:
             wifi_always_visible = False
 
-        # Show volume OSD while START is held
-        if start_held:
+        # Show volume OSD while START is held AND actively changing volume (dpad left/right)
+        if start_held and repeat_direction != 0:
             pct = vol_get()
             show_volume_osd(pct, duration=0.5, position=osd_position)
 
