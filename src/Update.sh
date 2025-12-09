@@ -43,8 +43,25 @@ echo "$NEW_COMMIT" > "$VERSION_FILE"
 # Generate changelog from git commits
 send_progress "PCT:40"
 echo "[3/5] Generating changelog..." | tee -a "$LOG_FILE"
+
+# Calculate version from version.json
+VERSION_JSON="$REPO_DIR/version.json"
+if [ -f "$VERSION_JSON" ]; then
+    MAJOR_MINOR=$(grep -o '"major_minor"[[:space:]]*:[[:space:]]*"[^"]*"' "$VERSION_JSON" | cut -d'"' -f4)
+    START_DATE=$(grep -o '"start_date"[[:space:]]*:[[:space:]]*"[^"]*"' "$VERSION_JSON" | cut -d'"' -f4)
+    if [ -n "$MAJOR_MINOR" ] && [ -n "$START_DATE" ]; then
+        PATCH_COUNT=$(git rev-list --count --since="$START_DATE" HEAD)
+        VERSION="$MAJOR_MINOR.$PATCH_COUNT"
+    else
+        VERSION="unknown"
+    fi
+else
+    VERSION="unknown"
+fi
+
 {
-    echo "# $(date '+%Y-%m-%d %H:%M')"
+    echo "# v$VERSION"
+    echo "$(date '+%Y-%m-%d %H:%M')"
     echo ""
     if [ "$OLD_COMMIT" != "$NEW_COMMIT" ]; then
         # Get the latest commit's subject and body
