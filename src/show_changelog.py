@@ -249,10 +249,11 @@ def draw_screen(screen, content_surface, scroll_y, font):
     # Draw title bar
     title_text = "Change Log"
     title_surf = font.render(title_text, True, TEXT_COLOR)
-    screen.blit(title_surf, (MARGIN_X, 15))
+    screen.blit(title_surf, (MARGIN_X, 10))
     
-    # Draw separator line
-    pygame.draw.line(screen, DIM_COLOR, (MARGIN_X, 42), (SCREEN_WIDTH - MARGIN_X, 42), 1)
+    # Draw separator line (below title)
+    sep_y = 10 + title_surf.get_height() + 6
+    pygame.draw.line(screen, DIM_COLOR, (MARGIN_X, sep_y), (SCREEN_WIDTH - MARGIN_X, sep_y), 1)
     
     # Create clipping rect for content area
     content_rect = pygame.Rect(MARGIN_X, MARGIN_Y, SCREEN_WIDTH - MARGIN_X * 2, CONTENT_HEIGHT)
@@ -277,11 +278,11 @@ def draw_screen(screen, content_surface, scroll_y, font):
         pygame.draw.rect(screen, HEADER_COLOR, (track_x, thumb_y, 6, thumb_height), border_radius=3)
     
     # Draw hint bar at bottom
-    hint_y = SCREEN_HEIGHT - 22
-    pygame.draw.line(screen, DIM_COLOR, (MARGIN_X, hint_y - 8), (SCREEN_WIDTH - MARGIN_X, hint_y - 8), 1)
-    hint_font = pygame.font.Font(None, 18)
+    hint_font = pygame.font.Font(None, 36)
     hint_text = "↑↓ Scroll   L/R Page   B Back"
     hint_surf = hint_font.render(hint_text, True, DIM_COLOR)
+    hint_y = SCREEN_HEIGHT - hint_surf.get_height() - 8
+    pygame.draw.line(screen, DIM_COLOR, (MARGIN_X, hint_y - 8), (SCREEN_WIDTH - MARGIN_X, hint_y - 8), 1)
     screen.blit(hint_surf, ((SCREEN_WIDTH - hint_surf.get_width()) // 2, hint_y))
     
     pygame.display.flip()
