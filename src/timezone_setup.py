@@ -455,8 +455,9 @@ class TimezoneApp:
             elif action == "A":
                 # Select timezone
                 new_tz = TIMEZONES[self.selected_index]
-                if set_timezone(new_tz):
-                    self.current_tz = new_tz
+                set_timezone(new_tz)
+                # Re-read from system to confirm
+                self.current_tz = get_current_timezone()
             elif action == "X" and not self.wifi_connected:
                 # Enter time edit mode (only if WiFi disconnected)
                 self.update_time_fields_from_system()
