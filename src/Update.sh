@@ -46,14 +46,17 @@ echo "[3/5] Generating changelog..." | tee -a "$LOG_FILE"
     echo "Updated: $(date '+%Y-%m-%d %H:%M')"
 } > "$CHANGELOG_FILE"
 
-echo "[4/5] Running installer..." | tee -a "$LOG_FILE"
+echo "[4/6] Running installer..." | tee -a "$LOG_FILE"
 if [ -x install.sh ]; then
     /home/pi/gamebird-os/install.sh >> "$LOG_FILE" 2>&1
 else
     echo "No install.sh found or not executable." | tee -a "$LOG_FILE"
 fi
 
-echo "[5/5] Rebooting..." | tee -a "$LOG_FILE"
+echo "[5/6] Setting permissions on scripts..." | tee -a "$LOG_FILE"
+chmod +x /home/pi/gamebird/settings/*.sh >> "$LOG_FILE" 2>&1 || true
+
+echo "[6/6] Rebooting..." | tee -a "$LOG_FILE"
 sleep 2
 
 kill $PNG_PID
