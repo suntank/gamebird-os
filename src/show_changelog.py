@@ -125,6 +125,30 @@ class InputManager:
         return False
 
 
+def wrap_text(text, font, max_width):
+    """Wrap text to fit within max_width. Returns list of lines."""
+    if not text:
+        return [""]
+    
+    words = text.split(' ')
+    lines = []
+    current_line = []
+    
+    for word in words:
+        test_line = ' '.join(current_line + [word])
+        if font.size(test_line)[0] <= max_width:
+            current_line.append(word)
+        else:
+            if current_line:
+                lines.append(' '.join(current_line))
+            current_line = [word]
+    
+    if current_line:
+        lines.append(' '.join(current_line))
+    
+    return lines if lines else [""]
+
+
 def read_changelog():
     """Read changelog and return as list of (text, is_header) tuples."""
     if not os.path.exists(CHANGELOG_PATH):
@@ -154,15 +178,24 @@ def render_changelog_surface(lines, font, title_font, width):
     line_height = font.get_linesize() + 4
     title_height = title_font.get_linesize() + 8
     
-    # Calculate total height
+    # Calculate total height with word wrapping
     total_height = 20  # top padding
     for text, style in lines:
-        if style in ("h1", "h2"):
-            total_height += title_height
+        if style == "h1":
+            wrapped = wrap_text(text, title_font, width)
+            total_height += title_height * len(wrapped)
+        elif style == "h2":
+            wrapped = wrap_text(text, title_font, width)
+            total_height += title_height * len(wrapped)
         elif style == "blank":
             total_height += line_height // 2
+        elif style == "bullet":
+            # Bullet text wraps with indent
+            wrapped = wrap_text(text, font, width - 20)
+            total_height += line_height * len(wrapped)
         else:
-            total_height += line_height
+            wrapped = wrap_text(text, font, width)
+            total_height += line_height * len(wrapped)
     total_height += 40  # bottom padding
     
     # Create surface
@@ -172,27 +205,39 @@ def render_changelog_surface(lines, font, title_font, width):
     y = 20
     for text, style in lines:
         if style == "h1":
-            surf = title_font.render(text, True, HEADER_COLOR)
-            surface.blit(surf, (0, y))
-            y += title_height
+            wrapped = wrap_text(text, title_font, width)
+            for line in wrapped:
+                surf = title_font.render(line, True, HEADER_COLOR)
+                surface.blit(surf, (0, y))
+                y += title_height
         elif style == "h2":
-            surf = title_font.render(text, True, ACCENT_COLOR)
-            surface.blit(surf, (0, y))
-            y += title_height
+            wrapped = wrap_text(text, title_font, width)
+            for line in wrapped:
+                surf = title_font.render(line, True, ACCENT_COLOR)
+                surface.blit(surf, (0, y))
+                y += title_height
         elif style == "h3":
-            surf = font.render(text, True, HEADER_COLOR)
-            surface.blit(surf, (10, y))
-            y += line_height
+            wrapped = wrap_text(text, font, width - 10)
+            for line in wrapped:
+                surf = font.render(line, True, HEADER_COLOR)
+                surface.blit(surf, (10, y))
+                y += line_height
         elif style == "bullet":
-            surf = font.render(text, True, TEXT_COLOR)
-            surface.blit(surf, (20, y))
-            y += line_height
+            wrapped = wrap_text(text, font, width - 20)
+            for i, line in enumerate(wrapped):
+                surf = font.render(line, True, TEXT_COLOR)
+                # First line at normal indent, continuation lines indented more
+                x_offset = 20 if i == 0 else 36
+                surface.blit(surf, (x_offset, y))
+                y += line_height
         elif style == "blank":
             y += line_height // 2
         else:
-            surf = font.render(text, True, TEXT_COLOR)
-            surface.blit(surf, (0, y))
-            y += line_height
+            wrapped = wrap_text(text, font, width)
+            for line in wrapped:
+                surf = font.render(line, True, TEXT_COLOR)
+                surface.blit(surf, (0, y))
+                y += line_height
     
     return surface
 
