@@ -71,10 +71,12 @@ echo "[3/5] Generating changelog..." | tee -a "$LOG_FILE"
 
 send_progress "PCT:60"
 echo "[4/6] Running installer..." | tee -a "$LOG_FILE"
-if [ -x install.sh ]; then
-    /home/pi/gamebird-os/install.sh >> "$LOG_FILE" 2>&1
+INSTALL_SCRIPT="$REPO_DIR/install.sh"
+if [ -f "$INSTALL_SCRIPT" ]; then
+    chmod +x "$INSTALL_SCRIPT"
+    "$INSTALL_SCRIPT" >> "$LOG_FILE" 2>&1
 else
-    echo "No install.sh found or not executable." | tee -a "$LOG_FILE"
+    echo "No install.sh found." | tee -a "$LOG_FILE"
 fi
 
 send_progress "PCT:80"
