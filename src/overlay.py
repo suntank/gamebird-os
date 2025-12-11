@@ -386,8 +386,8 @@ def battery(force=False):
     if not charging and level_icon == "alert_red":
         always_on = True
 
-    # START held keeps battery visible
-    if start_held:
+    # START held for 2+ seconds keeps battery visible
+    if wifi_always_visible:
         always_on = True
 
     # Show for 3 seconds when reaching "alert" (second-to-last before red) or "charging_full"
@@ -445,7 +445,7 @@ def wifi(force=False):
             "enabled"   if st_new == InterfaceState.ENABLED    else
             "disabled")
 
-    visible = wifi_always_visible or start_held or (time.time() < wifi_visible_until)
+    visible = wifi_always_visible or (time.time() < wifi_visible_until)
 
     if visible:
         if force or st_new != wifi_state or 'wifi' not in overlay_processes:
