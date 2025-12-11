@@ -99,6 +99,9 @@ class CatalogList(Screen):
         # Active tag filters
         self.filter_tags: List[str] = []
         
+        # Rating filter (None, 3, 4, or 5)
+        self.min_rating: Optional[float] = None
+        
         # Screenshot viewing
         self.viewing_screenshot = False
         self.screenshot_index = 0  # 0 = icon, 1-3 = screenshots
@@ -130,7 +133,8 @@ class CatalogList(Screen):
                 page=self.current_page,
                 per_page=self.GAMES_PER_PAGE,
                 include_mature=include_mature,
-                tags=self.filter_tags if self.filter_tags else None
+                tags=self.filter_tags if self.filter_tags else None,
+                min_rating=self.min_rating
             )
             
             self.games = result.games
@@ -196,9 +200,10 @@ class CatalogList(Screen):
         self.loading = True
         threading.Thread(target=self._fetch_catalog, daemon=True).start()
 
-    def set_filters(self, tags: List[str] = None):
-        """Set filter tags and reload catalog."""
+    def set_filters(self, tags: List[str] = None, min_rating: Optional[float] = None):
+        """Set filter tags and rating, then reload catalog."""
         self.filter_tags = tags or []
+        self.min_rating = min_rating
         self.current_page = 1
         self.selected_index = 0
         self.loading = True
@@ -330,9 +335,10 @@ class CatalogList(Screen):
         # === TOP BAR: Filter count / hint, Games count, Page info ===
         top_y = 6
         
-        if self.filter_tags:
+        if self.filter_tags or self.min_rating:
             # Show filter count
-            draw_text(surface, self.app.font, f"Filters: {len(self.filter_tags)}", 2, top_y)
+            filter_count = len(self.filter_tags) + (1 if self.min_rating else 0)
+            draw_text(surface, self.app.font, f"Filters: {filter_count}", 2, top_y)
             # Games count (center)
             draw_text(surface, self.app.font, f"Games: {self.total_games}", 83, top_y)
             # Page count (right)
@@ -1300,18 +1306,28 @@ class RebootScreen(Screen):
 
 class FilterScreen(Screen):
     """
-    Screen for selecting tag filters.
+    Screen for selecting tag and rating filters.
     Tags are grouped by category (players, genre, style).
-    User can toggle tags on/off and apply filters.
+    Rating filters: 3+, 4+, 5 stars.
+    User can toggle filters on/off and apply them.
     """
+    
+    # Rating filter options (value, display label)
+    RATING_OPTIONS = [
+        (3, "3+ Stars"),
+        (4, "4+ Stars"),
+        (5, "5 Stars"),
+    ]
     
     def __init__(self, app):
         super().__init__(app)
         self.tags_by_category: dict = {}  # category -> [{id, name}, ...]
         self.categories: List[str] = []   # Ordered list of categories
         self.all_tags: List[dict] = []    # Flat list for navigation
+        self.all_items: List[dict] = []   # Combined rating options + tags
         self.selected_index = 0
         self.selected_tags: set = set()   # Set of selected tag IDs
+        self.selected_rating: Optional[int] = None  # 3, 4, 5, or None
         self.loading = False
         self.error = None
 
@@ -1320,10 +1336,12 @@ class FilterScreen(Screen):
         self.error = None
         # Pre-select any existing filters from CatalogList
         catalog_screen = self.app.screens.get("CatalogList")
-        if catalog_screen and catalog_screen.filter_tags:
-            self.selected_tags = set(catalog_screen.filter_tags)
+        if catalog_screen:
+            self.selected_tags = set(catalog_screen.filter_tags) if catalog_screen.filter_tags else set()
+            self.selected_rating = int(catalog_screen.min_rating) if catalog_screen.min_rating else None
         else:
             self.selected_tags = set()
+            self.selected_rating = None
         threading.Thread(target=self._fetch_tags, daemon=True).start()
 
     def _fetch_tags(self):
@@ -1348,6 +1366,23 @@ class FilterScreen(Screen):
                         "category": cat
                     })
             
+            # Build combined items list: rating options first, then tags
+            self.all_items = []
+            for rating_val, rating_label in self.RATING_OPTIONS:
+                self.all_items.append({
+                    "type": "rating",
+                    "value": rating_val,
+                    "name": rating_label,
+                    "category": "rating"
+                })
+            for tag in self.all_tags:
+                self.all_items.append({
+                    "type": "tag",
+                    "id": tag["id"],
+                    "name": tag["name"],
+                    "category": tag["category"]
+                })
+            
             self.selected_index = 0
         except Exception as e:
             logging.error(f"Failed to fetch tags: {e}")
@@ -1361,23 +1396,32 @@ class FilterScreen(Screen):
                 self.app.go_back()
             return
 
-        if not self.all_tags:
+        if not self.all_items:
             if "B" in actions:
                 self.app.go_back()
             return
 
         # Navigation
         if "UP" in actions:
-            self.selected_index = (self.selected_index - 1) % len(self.all_tags)
+            self.selected_index = (self.selected_index - 1) % len(self.all_items)
         elif "DOWN" in actions:
-            self.selected_index = (self.selected_index + 1) % len(self.all_tags)
+            self.selected_index = (self.selected_index + 1) % len(self.all_items)
         elif "A" in actions:
-            # Toggle tag selection
-            tag_id = self.all_tags[self.selected_index]["id"]
-            if tag_id in self.selected_tags:
-                self.selected_tags.discard(tag_id)
+            # Toggle selection based on item type
+            item = self.all_items[self.selected_index]
+            if item["type"] == "rating":
+                # Toggle rating filter (only one can be active)
+                if self.selected_rating == item["value"]:
+                    self.selected_rating = None
+                else:
+                    self.selected_rating = item["value"]
             else:
-                self.selected_tags.add(tag_id)
+                # Toggle tag selection
+                tag_id = item["id"]
+                if tag_id in self.selected_tags:
+                    self.selected_tags.discard(tag_id)
+                else:
+                    self.selected_tags.add(tag_id)
         elif "START" in actions:
             # Apply filters and go back to catalog
             self._apply_filters()
@@ -1387,12 +1431,16 @@ class FilterScreen(Screen):
         elif "X" in actions:
             # Clear all filters
             self.selected_tags.clear()
+            self.selected_rating = None
 
     def _apply_filters(self):
         """Apply selected filters to CatalogList and navigate back."""
         catalog_screen = self.app.screens.get("CatalogList")
         if catalog_screen:
-            catalog_screen.set_filters(list(self.selected_tags))
+            catalog_screen.set_filters(
+                tags=list(self.selected_tags),
+                min_rating=float(self.selected_rating) if self.selected_rating else None
+            )
         self.app.change_screen("CatalogList")
 
     def draw(self, surface):
@@ -1409,40 +1457,45 @@ class FilterScreen(Screen):
             draw_text(surface, self.app.font, "Press B to go back", 120, 130, center=True)
             return
 
-        if not self.all_tags:
-            draw_text(surface, self.app.font, "No tags available", 120, 120, center=True)
+        if not self.all_items:
+            draw_text(surface, self.app.font, "No filters available", 120, 120, center=True)
             return
 
         # Show selected count
-        count = len(self.selected_tags)
+        count = len(self.selected_tags) + (1 if self.selected_rating else 0)
         count_text = f"{count} filter{'s' if count != 1 else ''} selected"
         draw_text(surface, self.app.font, count_text, 102, 34, (150, 150, 150))
 
-        # Draw scrolling tag list (simple approach - no inline category headers)
+        # Draw scrolling filter list (rating options + tags)
         max_visible = 8
-        total_tags = len(self.all_tags)
+        total_items = len(self.all_items)
         
         # Calculate start index to keep selected item visible
-        if total_tags <= max_visible:
+        if total_items <= max_visible:
             start_idx = 0
         else:
             start_idx = self.selected_index - 3
-            start_idx = max(0, min(start_idx, total_tags - max_visible))
+            start_idx = max(0, min(start_idx, total_items - max_visible))
         
-        end_idx = min(start_idx + max_visible, total_tags)
+        end_idx = min(start_idx + max_visible, total_items)
         
-        # Show category of selected tag at top-right
-        if self.all_tags:
-            selected_cat = self.all_tags[self.selected_index]["category"].upper()
+        # Show category of selected item at top-left
+        if self.all_items:
+            selected_cat = self.all_items[self.selected_index]["category"].upper()
             draw_text(surface, self.app.font, selected_cat, 15, 34, (200, 200, 200))
         
         y = 55
         for i in range(start_idx, end_idx):
-            tag = self.all_tags[i]
+            item = self.all_items[i]
             is_selected = i == self.selected_index
-            is_checked = tag["id"] in self.selected_tags
             
-            # Draw checkbox and tag name
+            # Check if item is active
+            if item["type"] == "rating":
+                is_checked = self.selected_rating == item["value"]
+            else:
+                is_checked = item["id"] in self.selected_tags
+            
+            # Draw checkbox and item name
             checkbox = "[X]" if is_checked else "[ ]"
             color = ACCENT_COLOR if is_selected else ((200, 200, 200) if is_checked else (150, 150, 150))
             
@@ -1451,7 +1504,7 @@ class FilterScreen(Screen):
                 rect = pygame.Rect(5, y - 2, 230, 18)
                 pygame.draw.rect(surface, (40, 40, 60), rect, border_radius=3)
             
-            draw_text(surface, self.app.font, f"{checkbox} {tag['name']}", 15, y, color)
+            draw_text(surface, self.app.font, f"{checkbox} {item['name']}", 15, y, color)
             y += 18
 
         # Bottom hints
