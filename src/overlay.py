@@ -618,7 +618,7 @@ try:
 
         # After processing input events, update wifi "hold to show" flag
         now = time.time()
-        if start_held and start_pressed_at is not None and now - start_pressed_at >= 2.0:
+        if start_held and start_pressed_at is not None and now - start_pressed_at >= 1.0:
             wifi_always_visible = True
             # Show time while holding START (only spawn if not already visible)
             if 'time' not in overlay_processes:
