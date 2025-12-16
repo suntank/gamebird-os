@@ -222,11 +222,12 @@ startup_time = time.time()
 wifi_visible_until = startup_time + 5.0
 battery_visible_until = startup_time + 5.0
 
-wifi_always_visible = False  # set while holding START for at least 2 seconds
+wifi_always_visible = False  # set while holding START for at least 1 second
 
 # START button timing
 start_held = False
 start_pressed_at = None
+start_hud_shown = False  # track if we've already shown HUD for this START hold
 
 # Track last OSD position to force overlay respawn on position change
 last_osd_position = osd_position
@@ -619,18 +620,33 @@ try:
         # After processing input events, update wifi "hold to show" flag
         now = time.time()
         if start_held and start_pressed_at is not None and now - start_pressed_at >= 1.0:
-            wifi_always_visible = True
-            # Show time while holding START (only spawn if not already visible)
-            if 'time' not in overlay_processes:
+            # Show all HUD elements together when 1 second threshold is reached
+            if not start_hud_shown:
+                start_hud_shown = True
+                wifi_always_visible = True
+                # Force spawn all elements at once for consistency
+                battery(force=True)
+                wifi(force=True)
                 show_time_osd(position=osd_position)
+                show_volume_osd(vol_get(), duration=999, position=osd_position)  # keep visible while held
+            else:
+                wifi_always_visible = True
         elif not start_held:
+            # Reset everything when START is released
+            if start_hud_shown:
+                start_hud_shown = False
+                wifi_always_visible = False
+                hide_time_osd()
+                # Clear volume OSD immediately
+                if 'vol' in overlay_processes:
+                    overlay_processes['vol'].kill()
+                    del overlay_processes['vol']
             wifi_always_visible = False
-            hide_time_osd()
 
         # Show volume OSD while START is held AND actively changing volume (dpad left/right)
-        if start_held and repeat_direction != 0:
+        if start_held and start_hud_shown and repeat_direction != 0:
             pct = vol_get()
-            show_volume_osd(pct, duration=0.5, position=osd_position)
+            show_volume_osd(pct, duration=999, position=osd_position)  # keep visible while held
 
         # auto-repeat while holding START + Dpad left/right
         if start_held and repeat_direction != 0:
