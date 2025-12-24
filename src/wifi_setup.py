@@ -317,6 +317,22 @@ class WifiManager:
     @staticmethod
     def disconnect():
         logging.info("Initiating disconnect sequence.")
+        
+        # First, find and disable the current network so it won't auto-reconnect
+        try:
+            status = WifiManager.get_wpa_status()
+            if status:
+                # Extract current network id from status
+                for line in status.splitlines():
+                    if line.startswith('id='):
+                        net_id = line.split('=')[1].strip()
+                        logging.info(f"Disabling network id={net_id} to prevent auto-reconnect")
+                        WifiManager._run_cmd(['sudo','wpa_cli','-i','wlan0','disable_network', net_id], check=False, timeout=3)
+                        break
+        except Exception as e:
+            logging.warning(f"Could not disable network: {e}")
+        
+        # Now disconnect
         try:
             WifiManager._run_cmd(['sudo','wpa_cli','-i','wlan0','disconnect'], check=False, timeout=3)
         except Exception as e:
@@ -336,6 +352,12 @@ class WifiManager:
                      logging.warning("Could not get wpa_status, but IP is gone. Assuming disconnected.")
                 else:
                     logging.info(f"IP is gone, but wpa_state is: {status_output}. Proceeding as disconnected.")
+                # Save config so the disabled state persists across reboots
+                try:
+                    WifiManager._run_cmd(['sudo','wpa_cli','-i','wlan0','save_config'], check=False, timeout=3)
+                    logging.info("Saved wpa_supplicant config with network disabled.")
+                except Exception as e:
+                    logging.warning(f"Could not save config after disconnect: {e}")
                 return True 
             time.sleep(poll_interval_s) 
             logging.debug(f"Disconnect poll attempt {i+1}/{max_polls}...")
