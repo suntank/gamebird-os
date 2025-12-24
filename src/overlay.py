@@ -10,6 +10,7 @@
 # 2025-05-01 • Austin edition
 
 import os, re, time, subprocess, logging, logging.handlers,fcntl,errno
+import threading
 from datetime import datetime
 from collections import deque
 from statistics import median
@@ -101,10 +102,10 @@ import urllib.request
 def check_for_git_update():
     try:
         local_head = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd="/home/pi/gamebird-os"
+            ["git", "rev-parse", "HEAD"], cwd="/home/pi/gamebird-os", timeout=5
         ).decode().strip()
         url = "https://api.github.com/repos/suntank/gamebird-os/commits/main"
-        with urllib.request.urlopen(url) as response:
+        with urllib.request.urlopen(url, timeout=3) as response:
             remote_data = json.loads(response.read())
             remote_head = remote_data["sha"]
             my_logger.info(f"GitHub update check: local={local_head} remote={remote_head}")
@@ -493,8 +494,14 @@ def environment():
             del overlay_processes[k]
     return val
 
-# Check for update at startup, but do not show overlay until main loop
-show_update_notice_flag = check_for_git_update()
+# Check for update in background thread (non-blocking at startup)
+show_update_notice_flag = False
+
+def _background_update_check():
+    global show_update_notice_flag
+    show_update_notice_flag = check_for_git_update()
+
+threading.Thread(target=_background_update_check, daemon=True).start()
 
 # ───────────────────────────────────────────────────────────────
 #  SECTION 6  -  Game-pad event loop
