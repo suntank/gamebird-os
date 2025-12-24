@@ -122,7 +122,7 @@ def check_for_git_update():
 def show_update_notice():
     png_path = "/tmp/update_notice.png"
     font = ImageFont.truetype(FONT_PATH, 24)
-    text = "New system update available.\nGo to Settings > Update."
+    text = "New system update available.\nGo to Tools > Update."
     # Get screen resolution (assume global 'resolution' is available)
     screen_w = int(resolution[0])
     screen_h = int(resolution[1])
