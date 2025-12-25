@@ -426,16 +426,19 @@ def wifi(force=False):
 
     st_new = InterfaceState.DISABLED
     try:
-        with open(wifi_carrier) as f:
-            carrier = int(f.read().strip())
-        if carrier == 1:
+        # Check for actual IP address (more reliable than carrier file)
+        ip_out = subprocess.check_output(['ip', 'addr', 'show', 'wlan0'], timeout=2).decode()
+        has_ip = 'inet ' in ip_out and 'DOWN' not in ip_out
+        
+        if has_ip:
             st_new = InterfaceState.CONNECTED
         else:
+            # Check if interface is up but no IP (enabled but not connected)
             with open(wifi_linkmode) as f:
                 link = int(f.read().strip())
             if link == 1:
                 st_new = InterfaceState.ENABLED
-    except IOError:
+    except (IOError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
         pass
 
     # 5 second display on connect or disconnect events
