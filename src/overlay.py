@@ -212,6 +212,7 @@ overlay_processes = {}
 battery_history   = deque(maxlen=15)
 wifi_state = bt_state = None  # Bluetooth icon overlay is hidden; state is tracked for logging only.
 battery_level = None
+prev_charging_state = None  # Track charging state to detect plug-in events
 # Track dpad state for emulated key-presses
 prev_abs_x = 0
 prev_abs_y = 0
@@ -396,6 +397,12 @@ def battery(force=False):
     if battery_level is not None and level_icon != battery_level:
         if level_icon == "alert" or level_icon == "charging_full" or level_icon == "20":
             battery_visible_until = time.time() + 3.0
+
+    # Show for 3 seconds when device is plugged in (charging state changes to True)
+    global prev_charging_state
+    if prev_charging_state is not None and charging and not prev_charging_state:
+        battery_visible_until = time.time() + 3.0
+    prev_charging_state = charging
 
     visible = always_on or (time.time() < battery_visible_until)
 
