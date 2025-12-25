@@ -8,6 +8,12 @@ CHANGELOG_FILE="/home/pi/gamebird-os/CHANGELOG.md"
 PROGRESS_FIFO="/tmp/update_progress_fifo"
 PROGRESS_SCRIPT="/home/pi/gamebird-os/src/update_progress.py"
 
+# Check for network connectivity before starting (timeout 3 seconds)
+if ! ping -c 1 -W 3 8.8.8.8 >/dev/null 2>&1 && ! ping -c 1 -W 3 1.1.1.1 >/dev/null 2>&1; then
+    echo "No internet connection. Update cancelled." | tee -a "$LOG_FILE"
+    exit 1
+fi
+
 # Start progress display
 python3 "$PROGRESS_SCRIPT" &
 PROGRESS_PID=$!
