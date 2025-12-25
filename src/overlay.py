@@ -164,15 +164,19 @@ icons = { "discharging": [ "alert_red","alert","20","30","30","50","60",
 # Mixer to control (amixer scontrols will list options)
 
 def _detect_volume_control() -> str:
-    out = subprocess.check_output(["amixer", "scontrols"]).decode()
+    out = subprocess.check_output(["amixer", "scontrols"], timeout=2).decode()
     # look for any control that, when you run `amixer sget`, shows a [%] in its output
     for name in re.findall(r"'([^']+)'", out):
-        sget = subprocess.check_output(["amixer", "sget", name]).decode()
+        sget = subprocess.check_output(["amixer", "sget", name], timeout=2).decode()
         if "%" in sget:
             return name
     raise RuntimeError("No volume control found")
 
-alsa_mixer_name = _detect_volume_control()
+try:
+    alsa_mixer_name = _detect_volume_control()
+except Exception as e:
+    my_logger.warning(f"_detect_volume_control() failed: {e}")
+    alsa_mixer_name = "Master"
 
 
 class InterfaceState(Enum):
@@ -204,8 +208,13 @@ my_logger.setLevel(logging.INFO)
 fh = logging.handlers.RotatingFileHandler(logfile, maxBytes=102400, backupCount=1)
 my_logger.addHandler(fh); my_logger.addHandler(logging.StreamHandler())
 
-resolution = re.search(r"(\d{3,}x\d{3,})",
-                       subprocess.check_output(fbfile.split()).decode()).group().split('x')
+try:
+    _fb_out = subprocess.check_output(fbfile.split(), timeout=2).decode()
+    _m = re.search(r"(\d{3,}x\d{3,})", _fb_out)
+    resolution = _m.group().split('x') if _m else ["480", "480"]
+except Exception as e:
+    my_logger.warning(f"FB resolution detect failed: {e}")
+    resolution = ["480", "480"]
 my_logger.info(f"FB resolution detected: {resolution}")
 
 overlay_processes = {}
@@ -219,6 +228,8 @@ prev_abs_y = 0
 
 # Icon visibility timers and flags
 startup_time = time.time()
+
+update_check_started = False
 
 # Show wifi and battery for 5 seconds on app start
 wifi_visible_until = startup_time + 5.0
@@ -511,8 +522,6 @@ def _background_update_check():
     global show_update_notice_flag
     show_update_notice_flag = check_for_git_update()
 
-threading.Thread(target=_background_update_check, daemon=True).start()
-
 # ───────────────────────────────────────────────────────────────
 #  SECTION 6  -  Game-pad event loop
 # ───────────────────────────────────────────────────────────────
@@ -680,7 +689,10 @@ try:
                 force_update = True
                 last_osd_position = osd_position
             bat_icon, v = battery(force=force_update)
-            wifi(force=force_update)
+            wst = wifi(force=force_update)
+            if not update_check_started and wst == InterfaceState.CONNECTED:
+                update_check_started = True
+                threading.Thread(target=_background_update_check, daemon=True).start()
             env_val = environment()  # env overlays always update as before
             last_status_log = now
 
