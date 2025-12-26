@@ -10,6 +10,30 @@
 # 2025-05-01 • Austin edition
 
 import os, re, time, subprocess, logging, logging.handlers,fcntl,errno
+import sys
+
+# ───────────────────────────────────────────────────────────────
+# Single-instance lock - prevent multiple overlay.py from running
+# ───────────────────────────────────────────────────────────────
+LOCK_FILE = "/tmp/overlay.py.lock"
+_lock_fd = None
+
+def acquire_lock():
+    global _lock_fd
+    _lock_fd = open(LOCK_FILE, 'w')
+    try:
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fd.write(str(os.getpid()))
+        _lock_fd.flush()
+        return True
+    except (IOError, OSError):
+        _lock_fd.close()
+        return False
+
+if not acquire_lock():
+    print("overlay.py already running, exiting.", file=sys.stderr)
+    sys.exit(0)
+
 import threading
 from datetime import datetime
 from collections import deque
@@ -579,7 +603,8 @@ def wait_for_emulationstation(timeout_sec=60):
     deadline = time.time() + timeout_sec
     while time.time() < deadline:
         try:
-            result = subprocess.run(['pgrep', '-x', 'emulationstation'], 
+            # Use -f to match against full command line, pattern matches various ES variants
+            result = subprocess.run(['pgrep', '-f', 'emulationstation'], 
                                     capture_output=True, timeout=2)
             if result.returncode == 0:
                 my_logger.info("EmulationStation detected, waiting 3s for display stability...")
