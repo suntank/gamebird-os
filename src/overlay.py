@@ -226,11 +226,7 @@ fbfile         = "tvservice -s"
 # ───────────────────────────────────────────────────────────────
 #  SECTION 3  -  Log + helpers
 # ───────────────────────────────────────────────────────────────
-# (re-init logger here so overlay.log goes in script dir)
-my_logger = logging.getLogger("overlay")
-my_logger.setLevel(logging.INFO)
-fh = logging.handlers.RotatingFileHandler(logfile, maxBytes=102400, backupCount=1)
-my_logger.addHandler(fh); my_logger.addHandler(logging.StreamHandler())
+# (logger already configured at top of file)
 
 # Resolution detection deferred to after ES starts (to avoid early framebuffer interaction)
 resolution = None
