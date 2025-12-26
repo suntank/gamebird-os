@@ -19,6 +19,7 @@ import pwd
 import shutil
 import subprocess as sp
 import tempfile
+import traceback
 from glob import glob
 
 POLL_DELAY = 2  # seconds
@@ -28,6 +29,8 @@ FBCP_ARGS  = ["-x", "200", "-y", "120", "-w", "240", "-h", "240", "-noscaling"]
 LOG_FILE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "hotplug_manager.log")
 LOCK_FILE = "/tmp/hotplug_manager.lock"
 _lock_fd = None
+
+_start_mono = time.monotonic()
 
 
 def _acquire_lock() -> bool:
@@ -52,7 +55,10 @@ if not _acquire_lock():
 
 
 def log(msg: str):
-    line = f"[HotPlug] {time.strftime('%Y-%m-%d %H:%M:%S')} | {msg}"
+    line = (
+        f"[HotPlug] {time.strftime('%Y-%m-%d %H:%M:%S')} "
+        f"t+{(time.monotonic() - _start_mono):.1f}s pid={os.getpid()} | {msg}"
+    )
     print(line, flush=True)
     try:
         with open(LOG_FILE, "a") as f:
@@ -61,12 +67,45 @@ def log(msg: str):
         pass
 
 
+def _handle_signal(signum, _frame):
+    try:
+        log(f"received signal {signum}; exiting")
+    finally:
+        raise SystemExit(0)
+
+
+signal.signal(signal.SIGTERM, _handle_signal)
+signal.signal(signal.SIGINT, _handle_signal)
+signal.signal(signal.SIGHUP, _handle_signal)
+
+
 def _run(argv, timeout: float = 2.0):
     return sp.run(argv, stdout=sp.DEVNULL, stderr=sp.DEVNULL, timeout=timeout)
 
 
 def _out(argv, timeout: float = 2.0) -> str:
     return sp.check_output(argv, text=True, stderr=sp.DEVNULL, timeout=timeout)
+
+
+def fbcp_running() -> bool:
+    base = os.path.basename(FBCP_CMD)
+    try:
+        out = _out(["pidof", base], timeout=1.0).strip()
+        return bool(out)
+    except Exception:
+        return False
+
+
+def ensure_fbcp_running():
+    """Start fbcp if it's not running. Avoid unnecessary restarts (screen blanking)."""
+    if fbcp_running():
+        return
+    log("fbcp-ili9341 not running; starting")
+    try:
+        sp.Popen([FBCP_CMD] + FBCP_ARGS, stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+        time.sleep(0.25)
+    except Exception as e:
+        log(f"failed to start fbcp-ili9341: {e}")
 
 
 def wait_for_snd(timeout_sec: float = 20.0) -> bool:
@@ -137,10 +176,16 @@ def _ensure_snippets():
 
     if not pathlib.Path(ASOUND_HDMI).exists():
         print("[HotPlug] Warning: /etc/asound.hdmi.conf missing, using fallback")
-        pathlib.Path("/home/pi/.asound.hdmi.conf").write_text(default_hdmi)
+        try:
+            pathlib.Path("/home/pi/.asound.hdmi.conf").write_text(default_hdmi)
+        except Exception:
+            pass
     if not pathlib.Path(ASOUND_HP).exists():
         print("[HotPlug] Warning: /etc/asound.hp.conf missing, using fallback")
-        pathlib.Path("/home/pi/.asound.hp.conf").write_text(default_hp)
+        try:
+            pathlib.Path("/home/pi/.asound.hp.conf").write_text(default_hp)
+        except Exception:
+            pass
 
 def _swap_asound(to_hdmi: bool):
     _ensure_snippets()
@@ -150,22 +195,33 @@ def _swap_asound(to_hdmi: bool):
             p = pathlib.Path(dst)
             if not p.exists() or p.read_bytes() != pathlib.Path(src).read_bytes():
                 shutil.copy(src, dst)
-        except PermissionError:
+        except (PermissionError, FileNotFoundError):
             pass
+        except Exception as e:
+            log(f"asound copy error dst={dst}: {e}")
     try:
         _run(["alsactl", "restore"], timeout=2.0)
     except sp.TimeoutExpired:
         log("alsactl restore timed out")
+    except FileNotFoundError:
+        log("alsactl not found")
+    except Exception as e:
+        log(f"alsactl restore error: {e}")
 
     # RetroPie runcommand audio_device override
     desired = "hdmi" if to_hdmi else "local"
     try:
-        lines = pathlib.Path(RUNCOMMAND_CFG).read_text().splitlines()
-    except FileNotFoundError:
-        lines = []
-    lines = [l for l in lines if not l.startswith("audio_device=")]
-    lines.append(f"audio_device={desired}")
-    pathlib.Path(RUNCOMMAND_CFG).write_text("\n".join(lines) + "\n")
+        try:
+            lines = pathlib.Path(RUNCOMMAND_CFG).read_text().splitlines()
+        except FileNotFoundError:
+            lines = []
+        lines = [l for l in lines if not l.startswith("audio_device=")]
+        lines.append(f"audio_device={desired}")
+        pathlib.Path(RUNCOMMAND_CFG).write_text("\n".join(lines) + "\n")
+    except PermissionError:
+        log(f"PermissionError writing {RUNCOMMAND_CFG}")
+    except Exception as e:
+        log(f"runcommand.cfg write error: {e}")
 
 
 def _amixer(card: str, numid: str, value: str):
@@ -178,6 +234,9 @@ def _amixer(card: str, numid: str, value: str):
             log(f"amixer timeout card={card} numid={numid}")
             time.sleep(0.2)
             continue
+        except FileNotFoundError:
+            log("amixer not found")
+            return
         except Exception as e:
             log(f"amixer error card={card} numid={numid}: {e}")
             time.sleep(0.2)
@@ -229,6 +288,10 @@ def restart_fbcp():
         _run(["systemctl", "stop", "fbcp-early.service"], timeout=2.0)
     except sp.TimeoutExpired:
         log("systemctl stop fbcp-early.service timed out")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log(f"systemctl stop fbcp-early.service error: {e}")
 
     # Find running PIDs
     try:
@@ -237,6 +300,11 @@ def restart_fbcp():
     except sp.CalledProcessError:
         pids = []
     except sp.TimeoutExpired:
+        pids = []
+    except FileNotFoundError:
+        pids = []
+    except Exception as e:
+        log(f"pidof error: {e}")
         pids = []
 
     # SIGTERM running instances
@@ -274,8 +342,8 @@ def main():
 
     log("hotplug_manager starting")
 
-    # Start fbcp immediately
-    restart_fbcp()
+    # Do not restart fbcp unnecessarily; only ensure it exists.
+    ensure_fbcp_running()
 
     if not wait_for_snd(20.0):
         log("/dev/snd not present after 20s; continuing")
@@ -285,24 +353,41 @@ def main():
     stable_count = 0
     debounce_polls = 3
 
-    while True:
-        raw = hdmi_connected()
-        if raw == stable:
-            stable_count += 1
-        else:
-            stable = raw
-            stable_count = 1
+    last_heartbeat = 0.0
+    heartbeat_sec = 30.0
 
-        if stable_count == debounce_polls and stable != last_state:
-            log(f"HDMI {'connected' if stable else 'disconnected'} – reconfiguring")
-            t0 = time.time()
-            set_audio(stable)
-            log(f"set_audio took {(time.time() - t0):.2f}s")
-            toggle_hat(not stable)
-            t1 = time.time()
-            restart_fbcp()
-            log(f"restart_fbcp took {(time.time() - t1):.2f}s")
-            last_state = stable
+    while True:
+        try:
+            now = time.monotonic()
+            if (now - last_heartbeat) >= heartbeat_sec:
+                last_heartbeat = now
+                log(f"heartbeat fbcp_running={fbcp_running()} hdmi={hdmi_connected()} last_state={last_state}")
+
+            # If something else kills fbcp, bring it back.
+            if not fbcp_running():
+                log("fbcp-ili9341 not running; restarting")
+                restart_fbcp()
+
+            raw = hdmi_connected()
+            if raw == stable:
+                stable_count += 1
+            else:
+                stable = raw
+                stable_count = 1
+
+            if stable_count == debounce_polls and stable != last_state:
+                log(f"HDMI {'connected' if stable else 'disconnected'} – reconfiguring")
+                t0 = time.time()
+                set_audio(stable)
+                log(f"set_audio took {(time.time() - t0):.2f}s")
+                toggle_hat(not stable)
+                # Avoid restarting fbcp on HDMI state transitions; it can blank the LCD.
+                # If fbcp gets killed or dies, the watchdog above will restart it.
+                ensure_fbcp_running()
+                last_state = stable
+        except Exception:
+            log("Unhandled exception in main loop:\n" + traceback.format_exc())
+            time.sleep(1.0)
 
         time.sleep(POLL_DELAY)
 
@@ -310,5 +395,8 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except KeyboardInterrupt:
-        pass
+    except SystemExit:
+        raise
+    except Exception:
+        log("Unhandled exception in __main__:\n" + traceback.format_exc())
+        raise
