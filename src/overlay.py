@@ -228,22 +228,9 @@ fbfile         = "tvservice -s"
 # ───────────────────────────────────────────────────────────────
 # (logger already configured at top of file)
 
-# Resolution detection deferred to after ES starts (to avoid early framebuffer interaction)
-resolution = None
-
-def _detect_resolution():
-    global resolution
-    if resolution is not None:
-        return resolution
-    try:
-        _fb_out = subprocess.check_output(fbfile.split(), timeout=2).decode()
-        _m = re.search(r"(\d{3,}x\d{3,})", _fb_out)
-        resolution = _m.group().split('x') if _m else ["480", "480"]
-    except Exception as e:
-        my_logger.warning(f"FB resolution detect failed: {e}")
-        resolution = ["480", "480"]
-    my_logger.info(f"FB resolution detected: {resolution}")
-    return resolution
+# Hardcoded resolution - tvservice queries can interfere with fbcp-ili9341
+resolution = ["480", "480"]
+my_logger.info(f"Using hardcoded resolution: {resolution}")
 
 overlay_processes = {}
 battery_history   = deque(maxlen=15)
@@ -614,9 +601,6 @@ def wait_for_emulationstation(timeout_sec=60):
 
 my_logger.info("Waiting for EmulationStation to start...")
 wait_for_emulationstation()
-
-# Now safe to detect resolution (ES has the framebuffer)
-_detect_resolution()
 
 my_logger.info("Starting overlay main loop.")
 
