@@ -208,14 +208,22 @@ my_logger.setLevel(logging.INFO)
 fh = logging.handlers.RotatingFileHandler(logfile, maxBytes=102400, backupCount=1)
 my_logger.addHandler(fh); my_logger.addHandler(logging.StreamHandler())
 
-try:
-    _fb_out = subprocess.check_output(fbfile.split(), timeout=2).decode()
-    _m = re.search(r"(\d{3,}x\d{3,})", _fb_out)
-    resolution = _m.group().split('x') if _m else ["480", "480"]
-except Exception as e:
-    my_logger.warning(f"FB resolution detect failed: {e}")
-    resolution = ["480", "480"]
-my_logger.info(f"FB resolution detected: {resolution}")
+# Resolution detection deferred to after ES starts (to avoid early framebuffer interaction)
+resolution = None
+
+def _detect_resolution():
+    global resolution
+    if resolution is not None:
+        return resolution
+    try:
+        _fb_out = subprocess.check_output(fbfile.split(), timeout=2).decode()
+        _m = re.search(r"(\d{3,}x\d{3,})", _fb_out)
+        resolution = _m.group().split('x') if _m else ["480", "480"]
+    except Exception as e:
+        my_logger.warning(f"FB resolution detect failed: {e}")
+        resolution = ["480", "480"]
+    my_logger.info(f"FB resolution detected: {resolution}")
+    return resolution
 
 overlay_processes = {}
 battery_history   = deque(maxlen=15)
@@ -437,20 +445,28 @@ def wifi(force=False):
 
     st_new = InterfaceState.DISABLED
     try:
-        # Check for actual IP address (more reliable than carrier file)
-        ip_out = subprocess.check_output(['ip', 'addr', 'show', 'wlan0'], timeout=2).decode()
-        has_ip = 'inet ' in ip_out and 'DOWN' not in ip_out
-        
-        if has_ip:
-            st_new = InterfaceState.CONNECTED
+        # First check if wlan0 even exists (avoid subprocess if not)
+        if not os.path.exists('/sys/class/net/wlan0'):
+            st_new = InterfaceState.DISABLED
         else:
-            # Check if interface is up but no IP (enabled but not connected)
-            with open(wifi_linkmode) as f:
-                link = int(f.read().strip())
-            if link == 1:
-                st_new = InterfaceState.ENABLED
-    except (IOError, subprocess.TimeoutExpired, subprocess.CalledProcessError):
-        pass
+            # Check for actual IP address (more reliable than carrier file)
+            ip_out = subprocess.check_output(['ip', 'addr', 'show', 'wlan0'], 
+                                             timeout=2, stderr=subprocess.DEVNULL).decode()
+            has_ip = 'inet ' in ip_out and 'DOWN' not in ip_out
+            
+            if has_ip:
+                st_new = InterfaceState.CONNECTED
+            else:
+                # Check if interface is up but no IP (enabled but not connected)
+                try:
+                    with open(wifi_linkmode) as f:
+                        link = int(f.read().strip())
+                    if link == 1:
+                        st_new = InterfaceState.ENABLED
+                except (IOError, ValueError):
+                    pass
+    except Exception:
+        pass  # Any error = assume disabled
 
     # 5 second display on connect or disconnect events
     prev_state = wifi_state
@@ -577,6 +593,10 @@ def wait_for_emulationstation(timeout_sec=60):
 
 my_logger.info("Waiting for EmulationStation to start...")
 wait_for_emulationstation()
+
+# Now safe to detect resolution (ES has the framebuffer)
+_detect_resolution()
+
 my_logger.info("Starting overlay main loop.")
 
 # Reset visibility timers after the delay so overlays still show for 5s from *now*
