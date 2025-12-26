@@ -342,8 +342,9 @@ def main():
 
     log("hotplug_manager starting")
 
-    # Do not restart fbcp unnecessarily; only ensure it exists.
-    ensure_fbcp_running()
+    # Ensure fbcp is running with our expected args (and stop any early service).
+    # This is the main thing that drives the SPI LCD; if it's wrong/missing, the screen stays black.
+    restart_fbcp()
 
     if not wait_for_snd(20.0):
         log("/dev/snd not present after 20s; continuing")
@@ -381,9 +382,13 @@ def main():
                 set_audio(stable)
                 log(f"set_audio took {(time.time() - t0):.2f}s")
                 toggle_hat(not stable)
-                # Avoid restarting fbcp on HDMI state transitions; it can blank the LCD.
-                # If fbcp gets killed or dies, the watchdog above will restart it.
-                ensure_fbcp_running()
+
+                # On first stable reading we only configure audio/hat; fbcp was already restarted at startup.
+                if last_state is not None:
+                    t1 = time.time()
+                    restart_fbcp()
+                    log(f"restart_fbcp took {(time.time() - t1):.2f}s")
+
                 last_state = stable
         except Exception:
             log("Unhandled exception in main loop:\n" + traceback.format_exc())
