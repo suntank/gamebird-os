@@ -556,11 +556,27 @@ last_status_log = 0         # timestamp for periodic status logs
 
 load_and_apply_config()
 
-# Delay overlay startup to let EmulationStation fully initialize the display
+# Wait for EmulationStation to be running before starting overlays
 # This prevents framebuffer conflicts that cause glitchy/corrupt display
-STARTUP_DELAY_SEC = 5
-my_logger.info(f"Waiting {STARTUP_DELAY_SEC}s for display to initialize...")
-time.sleep(STARTUP_DELAY_SEC)
+def wait_for_emulationstation(timeout_sec=60):
+    """Wait until emulationstation process is running."""
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        try:
+            result = subprocess.run(['pgrep', '-x', 'emulationstation'], 
+                                    capture_output=True, timeout=2)
+            if result.returncode == 0:
+                my_logger.info("EmulationStation detected, waiting 3s for display stability...")
+                time.sleep(3)  # Extra buffer after ES starts
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    my_logger.warning(f"EmulationStation not detected after {timeout_sec}s, proceeding anyway")
+    return False
+
+my_logger.info("Waiting for EmulationStation to start...")
+wait_for_emulationstation()
 my_logger.info("Starting overlay main loop.")
 
 # Reset visibility timers after the delay so overlays still show for 5s from *now*
