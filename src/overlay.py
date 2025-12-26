@@ -556,6 +556,18 @@ last_status_log = 0         # timestamp for periodic status logs
 
 load_and_apply_config()
 
+# Delay overlay startup to let EmulationStation fully initialize the display
+# This prevents framebuffer conflicts that cause glitchy/corrupt display
+STARTUP_DELAY_SEC = 5
+my_logger.info(f"Waiting {STARTUP_DELAY_SEC}s for display to initialize...")
+time.sleep(STARTUP_DELAY_SEC)
+my_logger.info("Starting overlay main loop.")
+
+# Reset visibility timers after the delay so overlays still show for 5s from *now*
+startup_time = time.time()
+wifi_visible_until = startup_time + 5.0
+battery_visible_until = startup_time + 5.0
+
 try:
     update_notice_shown = False
     while True:
