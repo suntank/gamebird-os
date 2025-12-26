@@ -602,6 +602,14 @@ def wait_for_emulationstation(timeout_sec=60):
 my_logger.info("Waiting for EmulationStation to start...")
 wait_for_emulationstation()
 
+# Kill any orphan pngview processes from previous runs to ensure clean display
+try:
+    subprocess.run(['killall', '-9', 'pngview'], stderr=subprocess.DEVNULL, timeout=2)
+    my_logger.info("Killed orphan pngview processes")
+    time.sleep(0.5)  # Let display settle
+except Exception:
+    pass
+
 my_logger.info("Starting overlay main loop.")
 
 # Reset visibility timers after the delay so overlays still show for 5s from *now*

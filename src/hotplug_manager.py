@@ -10,6 +10,8 @@ Game Bird – Hot‑plug manager w/ PID‑based fbcp restart
 """
 
 import os
+import fcntl
+import sys
 import signal
 import time
 import pathlib
@@ -23,16 +25,70 @@ POLL_DELAY = 2  # seconds
 FBCP_CMD   = "/usr/local/bin/fbcp-ili9341"
 FBCP_ARGS  = ["-x", "200", "-y", "120", "-w", "240", "-h", "240", "-noscaling"]
 
+LOG_FILE = os.path.join(os.path.dirname(os.path.realpath(__file__)), "hotplug_manager.log")
+LOCK_FILE = "/tmp/hotplug_manager.lock"
+_lock_fd = None
+
+
+def _acquire_lock() -> bool:
+    global _lock_fd
+    _lock_fd = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(_lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fd.write(str(os.getpid()))
+        _lock_fd.flush()
+        return True
+    except (OSError, IOError):
+        try:
+            _lock_fd.close()
+        except Exception:
+            pass
+        return False
+
+
+if not _acquire_lock():
+    print("hotplug_manager.py already running, exiting.", file=sys.stderr)
+    sys.exit(0)
+
+
+def log(msg: str):
+    line = f"[HotPlug] {time.strftime('%Y-%m-%d %H:%M:%S')} | {msg}"
+    print(line, flush=True)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+
+
+def _run(argv, timeout: float = 2.0):
+    return sp.run(argv, stdout=sp.DEVNULL, stderr=sp.DEVNULL, timeout=timeout)
+
+
+def _out(argv, timeout: float = 2.0) -> str:
+    return sp.check_output(argv, text=True, stderr=sp.DEVNULL, timeout=timeout)
+
+
+def wait_for_snd(timeout_sec: float = 20.0) -> bool:
+    deadline = time.time() + timeout_sec
+    while time.time() < deadline:
+        if pathlib.Path("/dev/snd").exists():
+            return True
+        time.sleep(0.2)
+    return False
+
 # -----------------------------------------------------------------------------
 # HDMI detection (EDID)
 # -----------------------------------------------------------------------------
 
 def _kms_edid_present() -> bool:
-    for edid in glob("/sys/class/drm/card*-HDMI-A-*/edid"):
+    for st in glob("/sys/class/drm/card*-HDMI-A-*/status"):
         try:
-            if pathlib.Path(edid).stat().st_size >= 128:
+            if pathlib.Path(st).read_text().strip() == "connected":
                 return True
         except FileNotFoundError:
+            pass
+        except Exception:
             pass
     return False
 
@@ -43,20 +99,21 @@ def _legacy_edid_present() -> bool:
     """
     with tempfile.NamedTemporaryFile() as tmp:
         try:
-            r = sp.run([
-                "/usr/bin/tvservice", "-d", tmp.name
-            ], stdout=sp.DEVNULL, stderr=sp.DEVNULL, timeout=3)
+            r = _run(["/usr/bin/tvservice", "-d", tmp.name], timeout=3)
             if r.returncode == 0 and pathlib.Path(tmp.name).stat().st_size >= 128:
                 return True
+        except sp.TimeoutExpired:
+            return False
         except FileNotFoundError:
             pass
     return False
 
 
 def hdmi_connected() -> bool:
-    ok = _kms_edid_present() or _legacy_edid_present()
-    print(f"DEBUG: HDMI connected? {ok}")
-    return ok
+    status_files = glob("/sys/class/drm/card*-HDMI-A-*/status")
+    if status_files:
+        return _kms_edid_present()
+    return _legacy_edid_present()
 
 # -----------------------------------------------------------------------------
 # Audio swap + runcommand override
@@ -95,7 +152,10 @@ def _swap_asound(to_hdmi: bool):
                 shutil.copy(src, dst)
         except PermissionError:
             pass
-    sp.run(["alsactl", "restore"], stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+    try:
+        _run(["alsactl", "restore"], timeout=2.0)
+    except sp.TimeoutExpired:
+        log("alsactl restore timed out")
 
     # RetroPie runcommand audio_device override
     desired = "hdmi" if to_hdmi else "local"
@@ -111,19 +171,23 @@ def _swap_asound(to_hdmi: bool):
 def _amixer(card: str, numid: str, value: str):
     """Robust amixer helper with up‑to‑three retries."""
     for _ in range(3):
-        sp.run(
-            ["amixer", "-q", "-c", card, "cset", f"numid={numid}", value],
-            stdout=sp.DEVNULL, stderr=sp.DEVNULL
-        )
-        out = sp.check_output([
-            "amixer", "-c", card, "cget", f"numid={numid}"
-        ], text=True)
+        try:
+            _run(["amixer", "-q", "-c", card, "cset", f"numid={numid}", value], timeout=1.0)
+            out = _out(["amixer", "-c", card, "cget", f"numid={numid}"], timeout=1.0)
+        except sp.TimeoutExpired:
+            log(f"amixer timeout card={card} numid={numid}")
+            time.sleep(0.2)
+            continue
+        except Exception as e:
+            log(f"amixer error card={card} numid={numid}: {e}")
+            time.sleep(0.2)
+            continue
         if value.isdigit():
             if f"values={value}" in out:
-                break
+                return
         else:
             if f"[{value}]" in out:
-                break
+                return
         time.sleep(0.1)
 
 
@@ -161,14 +225,18 @@ def toggle_hat(enable: bool):
 def restart_fbcp():
     base = os.path.basename(FBCP_CMD)
     # Kill early-started fbcp if it exists
-    sp.run(["systemctl", "stop", "fbcp-early.service"],
-        stdout=sp.DEVNULL, stderr=sp.DEVNULL)
+    try:
+        _run(["systemctl", "stop", "fbcp-early.service"], timeout=2.0)
+    except sp.TimeoutExpired:
+        log("systemctl stop fbcp-early.service timed out")
 
     # Find running PIDs
     try:
-        out = sp.check_output(["pidof", base], text=True).strip()
+        out = _out(["pidof", base], timeout=1.0).strip()
         pids = [int(p) for p in out.split()]
     except sp.CalledProcessError:
+        pids = []
+    except sp.TimeoutExpired:
         pids = []
 
     # SIGTERM running instances
@@ -201,24 +269,41 @@ def restart_fbcp():
 # Main loop
 # -----------------------------------------------------------------------------
 
-def log(msg: str):
-    print(f"[HotPlug] {time.strftime('%Y-%m-%d %H:%M:%S')} | {msg}", flush=True)
-
 
 def main():
+
+    log("hotplug_manager starting")
 
     # Start fbcp immediately
     restart_fbcp()
 
+    if not wait_for_snd(20.0):
+        log("/dev/snd not present after 20s; continuing")
+
     last_state = None
+    stable = None
+    stable_count = 0
+    debounce_polls = 3
+
     while True:
-        conn = hdmi_connected()
-        if conn != last_state:
-            log(f"HDMI {'connected' if conn else 'disconnected'} – reconfiguring")
-            set_audio(conn)
-            toggle_hat(not conn)
+        raw = hdmi_connected()
+        if raw == stable:
+            stable_count += 1
+        else:
+            stable = raw
+            stable_count = 1
+
+        if stable_count == debounce_polls and stable != last_state:
+            log(f"HDMI {'connected' if stable else 'disconnected'} – reconfiguring")
+            t0 = time.time()
+            set_audio(stable)
+            log(f"set_audio took {(time.time() - t0):.2f}s")
+            toggle_hat(not stable)
+            t1 = time.time()
             restart_fbcp()
-            last_state = conn
+            log(f"restart_fbcp took {(time.time() - t1):.2f}s")
+            last_state = stable
+
         time.sleep(POLL_DELAY)
 
 
