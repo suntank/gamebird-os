@@ -20,6 +20,7 @@ import shutil
 import subprocess as sp
 import tempfile
 import traceback
+from typing import List, Optional
 from glob import glob
 
 POLL_DELAY = 2  # seconds
@@ -94,6 +95,80 @@ def fbcp_running() -> bool:
         return bool(out)
     except Exception:
         return False
+
+
+def _fbcp_pids() -> List[int]:
+    base = os.path.basename(FBCP_CMD)
+    try:
+        out = _out(["pidof", base], timeout=1.0).strip()
+        if not out:
+            return []
+        return [int(p) for p in out.split()]
+    except Exception:
+        return []
+
+
+def _proc_cmdline(pid: int) -> Optional[List[str]]:
+    try:
+        raw = pathlib.Path(f"/proc/{pid}/cmdline").read_bytes()
+    except FileNotFoundError:
+        return None
+    except Exception:
+        return None
+    parts = [p.decode(errors="replace") for p in raw.split(b"\0") if p]
+    return parts
+
+
+def fbcp_cmdline_matches() -> bool:
+    expected = [FBCP_CMD] + FBCP_ARGS
+    for pid in _fbcp_pids():
+        cmd = _proc_cmdline(pid)
+        if not cmd:
+            continue
+        if cmd == expected:
+            return True
+        if cmd and os.path.realpath(cmd[0]) == os.path.realpath(FBCP_CMD) and cmd[1:] == FBCP_ARGS:
+            return True
+    return False
+
+
+def stop_fbcp_early():
+    try:
+        _run(["systemctl", "stop", "fbcp-early.service"], timeout=2.0)
+    except sp.TimeoutExpired:
+        log("systemctl stop fbcp-early.service timed out")
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        log(f"systemctl stop fbcp-early.service error: {e}")
+
+
+def _external_fbcp_manager_present() -> bool:
+    if os.environ.get("GBZ_EXTERNAL_FBCP", "").strip() == "1":
+        return True
+    unit = "fbcp-ili9341.service"
+    for base in (
+        "/etc/systemd/system",
+        "/lib/systemd/system",
+        "/usr/lib/systemd/system",
+    ):
+        try:
+            if os.path.exists(os.path.join(base, unit)):
+                try:
+                    r = _run(["systemctl", "is-enabled", unit], timeout=1.0)
+                    if getattr(r, "returncode", 1) == 0:
+                        return True
+                except Exception:
+                    pass
+                try:
+                    r = _run(["systemctl", "is-active", unit], timeout=1.0)
+                    if getattr(r, "returncode", 1) == 0:
+                        return True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    return False
 
 
 def ensure_fbcp_running():
@@ -284,14 +359,7 @@ def toggle_hat(enable: bool):
 def restart_fbcp():
     base = os.path.basename(FBCP_CMD)
     # Kill early-started fbcp if it exists
-    try:
-        _run(["systemctl", "stop", "fbcp-early.service"], timeout=2.0)
-    except sp.TimeoutExpired:
-        log("systemctl stop fbcp-early.service timed out")
-    except FileNotFoundError:
-        pass
-    except Exception as e:
-        log(f"systemctl stop fbcp-early.service error: {e}")
+    stop_fbcp_early()
 
     # Find running PIDs
     try:
@@ -342,9 +410,19 @@ def main():
 
     log("hotplug_manager starting")
 
-    # Ensure fbcp is running with our expected args (and stop any early service).
-    # This is the main thing that drives the SPI LCD; if it's wrong/missing, the screen stays black.
-    restart_fbcp()
+    manage_fbcp = not _external_fbcp_manager_present()
+    if manage_fbcp:
+        stop_fbcp_early()
+        if not fbcp_running():
+            log("fbcp-ili9341 not running at startup; starting")
+            ensure_fbcp_running()
+        elif not fbcp_cmdline_matches():
+            log("fbcp-ili9341 args mismatch at startup; restarting")
+            restart_fbcp()
+        else:
+            log("fbcp-ili9341 already running with expected args")
+    else:
+        log("external fbcp manager detected; hotplug_manager will not manage fbcp")
 
     if not wait_for_snd(20.0):
         log("/dev/snd not present after 20s; continuing")
@@ -365,7 +443,7 @@ def main():
                 log(f"heartbeat fbcp_running={fbcp_running()} hdmi={hdmi_connected()} last_state={last_state}")
 
             # If something else kills fbcp, bring it back.
-            if not fbcp_running():
+            if manage_fbcp and not fbcp_running():
                 log("fbcp-ili9341 not running; restarting")
                 restart_fbcp()
 
@@ -384,7 +462,7 @@ def main():
                 toggle_hat(not stable)
 
                 # On first stable reading we only configure audio/hat; fbcp was already restarted at startup.
-                if last_state is not None:
+                if manage_fbcp and last_state is not None:
                     t1 = time.time()
                     restart_fbcp()
                     log(f"restart_fbcp took {(time.time() - t1):.2f}s")

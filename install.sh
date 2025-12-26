@@ -80,6 +80,19 @@ else
     echo "overlay.py not found in src." | tee -a "$LOG_FILE"
 fi
 
+if [ -d "$REPO_DIR/services" ]; then
+    if [ "$(id -u)" -eq 0 ]; then
+        if ls "$REPO_DIR/services/"*.service >/dev/null 2>&1; then
+            echo "Installing systemd services..." | tee -a "$LOG_FILE"
+            cp "$REPO_DIR/services/"*.service /etc/systemd/system/ || true
+            systemctl daemon-reload || true
+            systemctl enable fbcp-ili9341.service 2>/dev/null || true
+        fi
+    else
+        echo "Not running as root; skipping systemd service install." | tee -a "$LOG_FILE"
+    fi
+fi
+
 # # 2. Copy service files EXAMPLE
 # if [ -d "$REPO_DIR/services" ]; then
 #     echo "[2/3] Installing systemd services..." | tee -a "$LOG_FILE"

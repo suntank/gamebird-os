@@ -1,0 +1,15 @@
+[Unit]
+Description=fbcp-ili9341 SPI LCD framebuffer copy
+After=local-fs.target
+Conflicts=fbcp-early.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/fbcp-ili9341 -x 200 -y 120 -w 240 -h 240 -noscaling
+Restart=always
+RestartSec=1
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target
