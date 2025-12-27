@@ -6,12 +6,15 @@ Conflicts=fbcp-early.service
 
 [Service]
 Type=simple
+ExecStartPre=/bin/systemctl stop fbcp-early.service
+ExecStartPre=/usr/bin/pkill -x fbcp-ili9341
 ExecStart=/usr/local/bin/fbcp-ili9341 -x 200 -y 120 -w 240 -h 240 -noscaling
 Restart=always
 RestartSec=1
 StartLimitIntervalSec=0
-StandardOutput=null
-StandardError=null
+KillMode=process
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

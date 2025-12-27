@@ -410,9 +410,7 @@ def main():
 
     log("hotplug_manager starting")
 
-    manage_fbcp = not _external_fbcp_manager_present()
-    external_start_failures = 0
-    external_start_failure_threshold = 6
+    manage_fbcp = os.environ.get("GBZ_MANAGE_FBCP", "").strip() == "1"
     if manage_fbcp:
         stop_fbcp_early()
         if not fbcp_running():
@@ -424,13 +422,7 @@ def main():
         else:
             log("fbcp-ili9341 already running with expected args")
     else:
-        log("external fbcp manager detected; hotplug_manager will not manage fbcp")
-        if not fbcp_running():
-            log("fbcp-ili9341 not running; attempting to start fbcp-ili9341.service")
-            try:
-                _run(["systemctl", "start", "fbcp-ili9341.service"], timeout=2.0)
-            except Exception as e:
-                log(f"failed to start fbcp-ili9341.service: {e}")
+        log("fbcp management disabled; fbcp-ili9341.service must manage fbcp")
 
     if not wait_for_snd(20.0):
         log("/dev/snd not present after 20s; continuing")
@@ -443,36 +435,12 @@ def main():
     last_heartbeat = 0.0
     heartbeat_sec = 30.0
 
-    last_fbcp_service_attempt = 0.0
-    fbcp_service_attempt_sec = 10.0
-
     while True:
         try:
             now = time.monotonic()
             if (now - last_heartbeat) >= heartbeat_sec:
                 last_heartbeat = now
                 log(f"heartbeat fbcp_running={fbcp_running()} hdmi={hdmi_connected()} last_state={last_state}")
-
-            # If fbcp is owned by systemd but isn't up, ask systemd to start it.
-            if (not manage_fbcp) and (not fbcp_running()) and ((now - last_fbcp_service_attempt) >= fbcp_service_attempt_sec):
-                last_fbcp_service_attempt = now
-                log("fbcp-ili9341 not running; asking systemd to start fbcp-ili9341.service")
-                try:
-                    _run(["systemctl", "start", "fbcp-ili9341.service"], timeout=2.0)
-                except Exception as e:
-                    log(f"failed to start fbcp-ili9341.service: {e}")
-
-                if fbcp_running():
-                    external_start_failures = 0
-                else:
-                    external_start_failures += 1
-                    if external_start_failures >= external_start_failure_threshold:
-                        log("fbcp-ili9341.service did not bring up fbcp; falling back to direct fbcp start")
-                        manage_fbcp = True
-                        try:
-                            ensure_fbcp_running()
-                        except Exception as e:
-                            log(f"fallback ensure_fbcp_running failed: {e}")
 
             # If something else kills fbcp, bring it back.
             if manage_fbcp and not fbcp_running():

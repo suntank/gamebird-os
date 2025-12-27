@@ -2,7 +2,7 @@
 set -e
 
 # Paths
-REPO_DIR="/home/pi/gamebird-os"
+REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC_DIR="$REPO_DIR/src"
 TARGET_SETTINGS_DIR="/home/pi/gamebird/settings"
 TARGET_OVERLAY_DIR="/home/pi/scripts/gbz_overlay"
@@ -97,9 +97,9 @@ if [ -d "$REPO_DIR/services" ]; then
         fi
         if ls "$REPO_DIR/services/"*.service >/dev/null 2>&1; then
             echo "Installing systemd services..." | tee -a "$LOG_FILE"
-            cp "$REPO_DIR/services/"*.service /etc/systemd/system/ || true
-            systemctl daemon-reload || true
-            systemctl enable fbcp-ili9341.service 2>/dev/null || true
+            cp "$REPO_DIR/services/"*.service /etc/systemd/system/
+            systemctl daemon-reload
+            systemctl enable fbcp-ili9341.service
         fi
     else
         echo "Not running as root; skipping systemd service install." | tee -a "$LOG_FILE"
