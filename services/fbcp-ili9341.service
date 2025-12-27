@@ -1,6 +1,7 @@
 [Unit]
 Description=fbcp-ili9341 SPI LCD framebuffer copy
-After=local-fs.target
+After=local-fs.target systemd-modules-load.service
+Wants=systemd-modules-load.service
 Conflicts=fbcp-early.service
 
 [Service]
@@ -8,6 +9,7 @@ Type=simple
 ExecStart=/usr/local/bin/fbcp-ili9341 -x 200 -y 120 -w 240 -h 240 -noscaling
 Restart=always
 RestartSec=1
+StartLimitIntervalSec=0
 StandardOutput=null
 StandardError=null
 

@@ -8,6 +8,14 @@ TARGET_SETTINGS_DIR="/home/pi/gamebird/settings"
 TARGET_OVERLAY_DIR="/home/pi/scripts/gbz_overlay"
 LOG_FILE="$REPO_DIR/install.log"
 
+ROOT_REMOUNTED=0
+cleanup() {
+    if [ "$ROOT_REMOUNTED" -eq 1 ]; then
+        mount -o remount,ro / 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
 echo "=== Game Bird Installer ===" | tee -a "$LOG_FILE"
 echo "Started: $(date)" | tee -a "$LOG_FILE"
 
@@ -82,6 +90,11 @@ fi
 
 if [ -d "$REPO_DIR/services" ]; then
     if [ "$(id -u)" -eq 0 ]; then
+        root_opts="$(findmnt -no OPTIONS / 2>/dev/null || true)"
+        if echo ",$root_opts," | grep -q ",ro,"; then
+            echo "Remounting / as rw" | tee -a "$LOG_FILE"
+            mount -o remount,rw / 2>/dev/null && ROOT_REMOUNTED=1 || true
+        fi
         if ls "$REPO_DIR/services/"*.service >/dev/null 2>&1; then
             echo "Installing systemd services..." | tee -a "$LOG_FILE"
             cp "$REPO_DIR/services/"*.service /etc/systemd/system/ || true
