@@ -66,19 +66,27 @@ persisted_volume_level = None
 # Default HUD position before loading config
 osd_position = 'bottom'    # 'top' or 'bottom'
 
+# Screen brightness (100 = full bright, 10 = very dim)
+screen_brightness = 100  # percentage, default fully bright
+BRIGHTNESS_STEP = 10
+BRIGHTNESS_MIN = 10
+BRIGHTNESS_MAX = 100
+DIM_OVERLAY_LAYER = 10000  # below status icons (15000) but above game content
+
 
 def load_config():
-    global osd_position, persisted_volume_level
+    global osd_position, persisted_volume_level, screen_brightness
     try:
         with open(config_path, 'r') as f:
             cfg = json.load(f)
             osd_position = cfg.get('osd_position', osd_position)
             persisted_volume_level = cfg.get('volume_level')
+            screen_brightness = cfg.get('screen_brightness', screen_brightness)
     except FileNotFoundError:
         pass
 
 def save_config():
-    cfg = {'osd_position': osd_position, 'volume_level': vol_get()}
+    cfg = {'osd_position': osd_position, 'volume_level': vol_get(), 'screen_brightness': screen_brightness}
     try:
         with open(config_path, 'w') as f:
             json.dump(cfg, f)
@@ -95,6 +103,12 @@ def load_and_apply_config():
             _alsa_volume(f"{persisted_volume_level}%")
         except Exception:
             pass
+
+def apply_saved_brightness():
+    """Apply saved brightness setting at startup (call after resolution is known)."""
+    global screen_brightness
+    if screen_brightness < 100:
+        spawn_dim_overlay(screen_brightness)
 
 # GitHub update check and update notice integration
 import urllib.request
@@ -348,6 +362,82 @@ def maybe_clear_volume_osd():
         del overlay_processes["vol"]
 
 # ───────────────────────────────────────────────────────────────
+#  Brightness control via translucent overlay
+# ───────────────────────────────────────────────────────────────
+brightness_osd_until = 0.0
+
+def build_dim_overlay_png(brightness_pct: int, path_out="/tmp/dim_overlay.png") -> str:
+    """Create a full-screen black overlay with alpha based on brightness.
+    brightness_pct=100 means fully bright (transparent overlay),
+    brightness_pct=10 means very dim (90% opaque black overlay)."""
+    screen_w = int(resolution[0])
+    screen_h = int(resolution[1])
+    # Alpha: 0 at 100% brightness, 230 (90%) at 10% brightness
+    alpha = int((100 - brightness_pct) * 255 / 100)
+    img = Image.new("RGBA", (screen_w, screen_h), (0, 0, 0, alpha))
+    img.save(path_out)
+    return path_out
+
+def spawn_dim_overlay(brightness_pct: int):
+    """Spawn or update the screen dimming overlay."""
+    if brightness_pct >= 100:
+        # Full brightness - remove dim overlay if present
+        if 'dim' in overlay_processes:
+            overlay_processes['dim'].kill()
+            del overlay_processes['dim']
+        return
+    
+    png = build_dim_overlay_png(brightness_pct)
+    # Use lower layer so status icons remain visible on top
+    if 'dim' in overlay_processes:
+        overlay_processes['dim'].kill()
+        del overlay_processes['dim']
+    
+    call = [pngview_path, "-d", "0", "-b", "0x0000", "-n",
+            "-l", str(DIM_OVERLAY_LAYER), "-y", "0", "-x", "0", png]
+    overlay_processes['dim'] = subprocess.Popen(call)
+
+def build_brightness_png(brightness_pct: int, path_out="/tmp/brightness_osd.png") -> str:
+    """Compose brightness indicator PNG."""
+    font_size = int(dpi * 0.7)
+    font = ImageFont.truetype(FONT_PATH, font_size)
+    
+    # Sun icon character or just text
+    txt = f"☀ {brightness_pct}%"
+    text_w, text_h = font.getsize(txt)
+    
+    img = Image.new("RGBA", (text_w + 16, text_h + 8), (0, 0, 0, 180))
+    draw = ImageDraw.Draw(img)
+    draw.text((8, 4), txt, font=font, fill=(255, 255, 255, 255))
+    img.save(path_out)
+    return path_out
+
+def show_brightness_osd(brightness_pct: int, duration=2.0, position='bottom'):
+    """Show brightness OSD indicator."""
+    global brightness_osd_until
+    png = build_brightness_png(brightness_pct)
+    img = Image.open(png)
+    # Center horizontally
+    x_pos = (int(resolution[0]) - img.width) // 2
+    y_pos = 0 if position == 'top' else int(resolution[1]) - dpi - 8
+    spawn_overlay('brightness_osd', png, x_pos, y_pos)
+    brightness_osd_until = time.time() + duration
+
+def maybe_clear_brightness_osd():
+    if "brightness_osd" in overlay_processes and time.time() >= brightness_osd_until:
+        overlay_processes["brightness_osd"].kill()
+        del overlay_processes["brightness_osd"]
+
+def change_brightness(delta: int) -> int:
+    """Change brightness by delta and update overlay. Returns new brightness."""
+    global screen_brightness
+    new_brightness = max(BRIGHTNESS_MIN, min(BRIGHTNESS_MAX, screen_brightness + delta))
+    if new_brightness != screen_brightness:
+        screen_brightness = new_brightness
+        spawn_dim_overlay(screen_brightness)
+    return screen_brightness
+
+# ───────────────────────────────────────────────────────────────
 #  SECTION 5  -  Battery / Wi-Fi / BT / env
 # ───────────────────────────────────────────────────────────────
 def is_charging():
@@ -555,6 +645,7 @@ repeat_step = 2             # percent per repeat
 last_status_log = 0         # timestamp for periodic status logs
 
 load_and_apply_config()
+apply_saved_brightness()  # Apply saved brightness dimming overlay
 
 try:
     update_notice_shown = False
@@ -607,38 +698,18 @@ try:
                                 repeat_direction = 0
                             prev_abs_x = ev.value
 
-                    # Vertical (up or down)
+                    # Vertical (up or down) - brightness control
                     elif ev.code == ecodes.ABS_Y:
                         if prev_abs_y != ev.value:
-                            if ev.value == -1:  # up pressed
-                                osd_position = 'top'
+                            if ev.value == -1:  # up pressed - increase brightness
+                                brightness = change_brightness(BRIGHTNESS_STEP)
+                                show_brightness_osd(brightness, position=osd_position)
                                 save_config()
-                                pct = vol_get()
-                                show_volume_osd(pct, position=osd_position)
 
-                                # When icons are moved, show wifi and battery for 5 seconds
-                                t = time.time()
-                                battery_visible_until = t + 5.0
-                                wifi_visible_until = t + 5.0
-
-                                # Immediately update other overlays on position change
-                                battery(force=True)
-                                wifi(force=True)
-                                environment()
-
-                            elif ev.value == 1:  # down pressed
-                                osd_position = 'bottom'
+                            elif ev.value == 1:  # down pressed - decrease brightness
+                                brightness = change_brightness(-BRIGHTNESS_STEP)
+                                show_brightness_osd(brightness, position=osd_position)
                                 save_config()
-                                pct = vol_get()
-                                show_volume_osd(pct, position=osd_position)
-
-                                t = time.time()
-                                battery_visible_until = t + 5.0
-                                wifi_visible_until = t + 5.0
-
-                                battery(force=True)
-                                wifi(force=True)
-                                environment()
                             prev_abs_y = ev.value
         except BlockingIOError:
             pass                                       # nothing to read
@@ -698,6 +769,7 @@ try:
 
         # 3. Clear volume OSD if time elapsed
         maybe_clear_volume_osd()
+        maybe_clear_brightness_osd()
 
         time.sleep(0.01)  # tiny sleep keeps CPU usage civil
 except KeyboardInterrupt:
