@@ -367,48 +367,38 @@ def maybe_clear_volume_osd():
 brightness_osd_until = 0.0
 
 def build_dim_overlay_png(brightness_pct: int, path_out="/tmp/dim_overlay.png") -> str:
-    """Create a full-screen dimming overlay with a multiply-like effect.
-    Uses dark gray instead of pure black for better contrast preservation.
+    """Create a full-screen dimming overlay that simulates reduced backlight.
+    Uses pure black with a carefully tuned alpha curve for natural dimming.
     brightness_pct=100 means fully bright (no overlay),
     brightness_pct=10 means very dim."""
     screen_w = int(resolution[0])
     screen_h = int(resolution[1])
-    # Use a softer alpha curve - max 70% opacity even at lowest brightness
-    # This preserves more contrast like a multiply blend
+    # Use exponential curve for more natural brightness perception
+    # Human brightness perception is roughly logarithmic
     dim_amount = (100 - brightness_pct) / 100.0
-    alpha = int(dim_amount * 180)  # max 180/255 = ~70% opacity
-    # Use dark gray (20,20,30) instead of pure black for softer multiply-like effect
-    # Slight blue tint helps preserve perceived contrast
-    img = Image.new("RGBA", (screen_w, screen_h), (15, 15, 25, alpha))
+    # Exponential curve: alpha rises slowly at first, faster at low brightness
+    # This keeps contrast better at moderate dim levels
+    alpha = int((dim_amount ** 1.5) * 220)  # max ~86% opacity at 10% brightness
+    # Pure black preserves color accuracy better than tinted overlays
+    img = Image.new("RGBA", (screen_w, screen_h), (0, 0, 0, alpha))
     img.save(path_out)
     return path_out
 
 def spawn_dim_overlay(brightness_pct: int):
-    """Spawn or update the screen dimming overlay."""
+    """Spawn or update the screen dimming overlay (non-blocking)."""
     try:
         if brightness_pct >= 100:
             # Full brightness - remove dim overlay if present
             if 'dim' in overlay_processes:
-                try:
-                    overlay_processes['dim'].terminate()
-                    overlay_processes['dim'].wait(timeout=0.5)
-                except Exception:
-                    overlay_processes['dim'].kill()
+                overlay_processes['dim'].kill()
                 del overlay_processes['dim']
             return
         
         png = build_dim_overlay_png(brightness_pct)
-        # Use lower layer so status icons remain visible on top
+        # Kill old overlay without waiting (non-blocking)
         if 'dim' in overlay_processes:
-            try:
-                overlay_processes['dim'].terminate()
-                overlay_processes['dim'].wait(timeout=0.5)
-            except Exception:
-                overlay_processes['dim'].kill()
+            overlay_processes['dim'].kill()
             del overlay_processes['dim']
-        
-        # Small delay to ensure previous process released the layer
-        time.sleep(0.05)
         
         call = [pngview_path, "-d", "0", "-b", "0x0000", "-n",
                 "-l", str(DIM_OVERLAY_LAYER), "-y", "0", "-x", "0", png]
