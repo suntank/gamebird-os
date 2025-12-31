@@ -367,61 +367,96 @@ def maybe_clear_volume_osd():
 brightness_osd_until = 0.0
 
 def build_dim_overlay_png(brightness_pct: int, path_out="/tmp/dim_overlay.png") -> str:
-    """Create a full-screen black overlay with alpha based on brightness.
-    brightness_pct=100 means fully bright (transparent overlay),
-    brightness_pct=10 means very dim (90% opaque black overlay)."""
+    """Create a full-screen dimming overlay with a multiply-like effect.
+    Uses dark gray instead of pure black for better contrast preservation.
+    brightness_pct=100 means fully bright (no overlay),
+    brightness_pct=10 means very dim."""
     screen_w = int(resolution[0])
     screen_h = int(resolution[1])
-    # Alpha: 0 at 100% brightness, 230 (90%) at 10% brightness
-    alpha = int((100 - brightness_pct) * 255 / 100)
-    img = Image.new("RGBA", (screen_w, screen_h), (0, 0, 0, alpha))
+    # Use a softer alpha curve - max 70% opacity even at lowest brightness
+    # This preserves more contrast like a multiply blend
+    dim_amount = (100 - brightness_pct) / 100.0
+    alpha = int(dim_amount * 180)  # max 180/255 = ~70% opacity
+    # Use dark gray (20,20,30) instead of pure black for softer multiply-like effect
+    # Slight blue tint helps preserve perceived contrast
+    img = Image.new("RGBA", (screen_w, screen_h), (15, 15, 25, alpha))
     img.save(path_out)
     return path_out
 
 def spawn_dim_overlay(brightness_pct: int):
     """Spawn or update the screen dimming overlay."""
-    if brightness_pct >= 100:
-        # Full brightness - remove dim overlay if present
+    try:
+        if brightness_pct >= 100:
+            # Full brightness - remove dim overlay if present
+            if 'dim' in overlay_processes:
+                try:
+                    overlay_processes['dim'].terminate()
+                    overlay_processes['dim'].wait(timeout=0.5)
+                except Exception:
+                    overlay_processes['dim'].kill()
+                del overlay_processes['dim']
+            return
+        
+        png = build_dim_overlay_png(brightness_pct)
+        # Use lower layer so status icons remain visible on top
         if 'dim' in overlay_processes:
-            overlay_processes['dim'].kill()
+            try:
+                overlay_processes['dim'].terminate()
+                overlay_processes['dim'].wait(timeout=0.5)
+            except Exception:
+                overlay_processes['dim'].kill()
             del overlay_processes['dim']
-        return
-    
-    png = build_dim_overlay_png(brightness_pct)
-    # Use lower layer so status icons remain visible on top
-    if 'dim' in overlay_processes:
-        overlay_processes['dim'].kill()
-        del overlay_processes['dim']
-    
-    call = [pngview_path, "-d", "0", "-b", "0x0000", "-n",
-            "-l", str(DIM_OVERLAY_LAYER), "-y", "0", "-x", "0", png]
-    overlay_processes['dim'] = subprocess.Popen(call)
+        
+        # Small delay to ensure previous process released the layer
+        time.sleep(0.05)
+        
+        call = [pngview_path, "-d", "0", "-b", "0x0000", "-n",
+                "-l", str(DIM_OVERLAY_LAYER), "-y", "0", "-x", "0", png]
+        overlay_processes['dim'] = subprocess.Popen(call)
+        my_logger.info(f"Spawned dim overlay at brightness {brightness_pct}%")
+    except Exception as e:
+        my_logger.error(f"spawn_dim_overlay error: {e}")
 
 def build_brightness_png(brightness_pct: int, path_out="/tmp/brightness_osd.png") -> str:
     """Compose brightness indicator PNG."""
-    font_size = int(dpi * 0.7)
-    font = ImageFont.truetype(FONT_PATH, font_size)
-    
-    # Sun icon character or just text
-    txt = f"☀ {brightness_pct}%"
-    text_w, text_h = font.getsize(txt)
-    
-    img = Image.new("RGBA", (text_w + 16, text_h + 8), (0, 0, 0, 180))
-    draw = ImageDraw.Draw(img)
-    draw.text((8, 4), txt, font=font, fill=(255, 255, 255, 255))
-    img.save(path_out)
-    return path_out
+    try:
+        font_size = int(dpi * 0.7)
+        font = ImageFont.truetype(FONT_PATH, font_size)
+        
+        # Use simple text without unicode sun symbol for compatibility
+        txt = f"Brightness {brightness_pct}%"
+        # Use getbbox for newer Pillow, fall back to getsize for older
+        try:
+            bbox = font.getbbox(txt)
+            text_w, text_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        except AttributeError:
+            text_w, text_h = font.getsize(txt)
+        
+        img = Image.new("RGBA", (text_w + 16, text_h + 8), (0, 0, 0, 180))
+        draw = ImageDraw.Draw(img)
+        draw.text((8, 4), txt, font=font, fill=(255, 255, 255, 255))
+        img.save(path_out)
+        return path_out
+    except Exception as e:
+        my_logger.error(f"build_brightness_png error: {e}")
+        # Return a fallback minimal PNG
+        img = Image.new("RGBA", (100, 30), (0, 0, 0, 180))
+        img.save(path_out)
+        return path_out
 
 def show_brightness_osd(brightness_pct: int, duration=2.0, position='bottom'):
     """Show brightness OSD indicator."""
     global brightness_osd_until
-    png = build_brightness_png(brightness_pct)
-    img = Image.open(png)
-    # Center horizontally
-    x_pos = (int(resolution[0]) - img.width) // 2
-    y_pos = 0 if position == 'top' else int(resolution[1]) - dpi - 8
-    spawn_overlay('brightness_osd', png, x_pos, y_pos)
-    brightness_osd_until = time.time() + duration
+    try:
+        png = build_brightness_png(brightness_pct)
+        img = Image.open(png)
+        # Center horizontally
+        x_pos = (int(resolution[0]) - img.width) // 2
+        y_pos = 0 if position == 'top' else int(resolution[1]) - dpi - 8
+        spawn_overlay('brightness_osd', png, x_pos, y_pos)
+        brightness_osd_until = time.time() + duration
+    except Exception as e:
+        my_logger.error(f"show_brightness_osd error: {e}")
 
 def maybe_clear_brightness_osd():
     if "brightness_osd" in overlay_processes and time.time() >= brightness_osd_until:
@@ -431,11 +466,16 @@ def maybe_clear_brightness_osd():
 def change_brightness(delta: int) -> int:
     """Change brightness by delta and update overlay. Returns new brightness."""
     global screen_brightness
-    new_brightness = max(BRIGHTNESS_MIN, min(BRIGHTNESS_MAX, screen_brightness + delta))
-    if new_brightness != screen_brightness:
-        screen_brightness = new_brightness
-        spawn_dim_overlay(screen_brightness)
-    return screen_brightness
+    try:
+        new_brightness = max(BRIGHTNESS_MIN, min(BRIGHTNESS_MAX, screen_brightness + delta))
+        my_logger.info(f"Brightness change: {screen_brightness} -> {new_brightness} (delta={delta})")
+        if new_brightness != screen_brightness:
+            screen_brightness = new_brightness
+            spawn_dim_overlay(screen_brightness)
+        return screen_brightness
+    except Exception as e:
+        my_logger.error(f"change_brightness error: {e}")
+        return screen_brightness
 
 # ───────────────────────────────────────────────────────────────
 #  SECTION 5  -  Battery / Wi-Fi / BT / env
