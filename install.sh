@@ -11,11 +11,22 @@ LOG_FILE="$REPO_DIR/install.log"
 echo "=== Game Bird Installer ===" | tee -a "$LOG_FILE"
 echo "Started: $(date)" | tee -a "$LOG_FILE"
 
+# Check if filesystem is read-only and remount if needed
+if [ ! -w / ]; then
+    echo "Remounting filesystem as read-write..." | tee -a "$LOG_FILE"
+    sudo mount -o remount,rw / || {
+        echo "ERROR: Failed to remount filesystem as read-write" | tee -a "$LOG_FILE"
+        exit 1
+    }
+    echo "Filesystem remounted as read-write" | tee -a "$LOG_FILE"
+fi
+
 # Ensure target directories exist
 mkdir -p "$TARGET_SETTINGS_DIR"
 mkdir -p "$TARGET_OVERLAY_DIR"
+mkdir -p "/usr/local/bin"
 
-# 1. Copy src files to settings (except overlay.py)
+# 1. Copy src files to settings (except overlay.py)oh
 if [ -d "$SRC_DIR" ]; then
     echo "Copying src files to settings..." | tee -a "$LOG_FILE"
     for file in "$SRC_DIR"/*; do
@@ -80,6 +91,21 @@ else
     echo "overlay.py not found in src." | tee -a "$LOG_FILE"
 fi
 
+# 4. Install fbcp-ili9341 to /usr/local/bin
+if [ -f "$SRC_DIR/fbcp-ili9341" ]; then
+    target="/usr/local/bin/fbcp-ili9341"
+    if [ ! -f "$target" ] || [ "$SRC_DIR/fbcp-ili9341" -nt "$target" ] || [ "$(stat -c%s "$SRC_DIR/fbcp-ili9341")" != "$(stat -c%s "$target")" ]; then
+        echo "Installing: fbcp-ili9341 -> /usr/local/bin" | tee -a "$LOG_FILE"
+        cp "$SRC_DIR/fbcp-ili9341" "$target"
+        chmod +x "$target"
+        echo "fbcp-ili9341 installed to /usr/local/bin" | tee -a "$LOG_FILE"
+    else
+        echo "Up to date: fbcp-ili9341" | tee -a "$LOG_FILE"
+    fi
+else
+    echo "fbcp-ili9341 not found in src." | tee -a "$LOG_FILE"
+fi
+
 # # 2. Copy service files EXAMPLE
 # if [ -d "$REPO_DIR/services" ]; then
 #     echo "[2/3] Installing systemd services..." | tee -a "$LOG_FILE"
@@ -91,7 +117,7 @@ fi
 #     echo "No services to install." | tee -a "$LOG_FILE"
 # fi
 
-# 3. Log version
+# 5. Log version
 if [ -f "$REPO_DIR/.last_update_commit" ]; then
     echo "Updated to commit:" | tee -a "$LOG_FILE"
     cat "$REPO_DIR/.last_update_commit" | tee -a "$LOG_FILE"

@@ -48,6 +48,7 @@ here           = os.path.dirname(os.path.realpath(__file__))
 material_icons = "/home/pi/src/material-design-icons-master/device/drawable-mdpi/"
 overlay_icons  = f"{here}/overlay_icons/"                      # your custom PNGs
 logfile        = f"{here}/overlay.log"
+dimming_client  = f"{here}/dimming_client.py"                  # fbcp-ili9341 tone mapping control
 
 # fallback speaker icon (provide your own nicer one later)
 speaker_icon   = overlay_icons + "speaker.png"
@@ -72,6 +73,20 @@ BRIGHTNESS_STEP = 10
 BRIGHTNESS_MIN = 10
 BRIGHTNESS_MAX = 100
 DIM_OVERLAY_LAYER = 10000  # below status icons (15000) but above game content
+
+# Tone mapping profiles for fbcp-ili9341
+BRIGHTNESS_PROFILES = {
+    100: "off",           # Full brightness - disable tone mapping
+    90:  "punchy",        # Less dim, retains pop
+    80:  "factory_fix",   # Default correction
+    70:  "factory_fix",   # Default correction  
+    60:  "factory_fix",   # Default correction
+    50:  "night",         # Dark but still readable
+    40:  "night",         # Dark but still readable
+    30:  "night",         # Dark but still readable
+    20:  "night",         # Dark but still readable
+    10:  "night",         # Dark but still readable
+}
 
 
 def load_config():
@@ -104,11 +119,27 @@ def load_and_apply_config():
         except Exception:
             pass
 
+def set_tone_mapping_profile(profile_name: str):
+    """Set fbcp-ili9341 tone mapping profile."""
+    try:
+        if os.path.exists(dimming_client):
+            result = subprocess.run(['python3', dimming_client, 'PROFILE', profile_name], 
+                                  capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                my_logger.info(f"Set tone mapping profile: {profile_name}")
+            else:
+                my_logger.error(f"Failed to set profile {profile_name}: {result.stderr}")
+        else:
+            my_logger.warning(f"dimming_client not found at {dimming_client}")
+    except Exception as e:
+        my_logger.error(f"set_tone_mapping_profile error: {e}")
+
 def apply_saved_brightness():
     """Apply saved brightness setting at startup (call after resolution is known)."""
     global screen_brightness
     if screen_brightness < 100:
-        spawn_dim_overlay(screen_brightness)
+        profile = BRIGHTNESS_PROFILES.get(screen_brightness, "factory_fix")
+        set_tone_mapping_profile(profile)
 
 # GitHub update check and update notice integration
 import urllib.request
@@ -362,50 +393,9 @@ def maybe_clear_volume_osd():
         del overlay_processes["vol"]
 
 # ───────────────────────────────────────────────────────────────
-#  Brightness control via translucent overlay
+#  Brightness control via fbcp-ili9341 tone mapping
 # ───────────────────────────────────────────────────────────────
 brightness_osd_until = 0.0
-
-def build_dim_overlay_png(brightness_pct: int, path_out="/tmp/dim_overlay.png") -> str:
-    """Create a full-screen dimming overlay that simulates reduced backlight.
-    Uses pure black with a carefully tuned alpha curve for natural dimming.
-    brightness_pct=100 means fully bright (no overlay),
-    brightness_pct=10 means very dim."""
-    screen_w = int(resolution[0])
-    screen_h = int(resolution[1])
-    # Use exponential curve for more natural brightness perception
-    # Human brightness perception is roughly logarithmic
-    dim_amount = (100 - brightness_pct) / 100.0
-    # Exponential curve: alpha rises slowly at first, faster at low brightness
-    # This keeps contrast better at moderate dim levels
-    alpha = int((dim_amount ** 1.5) * 220)  # max ~86% opacity at 10% brightness
-    # Pure black preserves color accuracy better than tinted overlays
-    img = Image.new("RGBA", (screen_w, screen_h), (0, 0, 0, alpha))
-    img.save(path_out)
-    return path_out
-
-def spawn_dim_overlay(brightness_pct: int):
-    """Spawn or update the screen dimming overlay (non-blocking)."""
-    try:
-        if brightness_pct >= 100:
-            # Full brightness - remove dim overlay if present
-            if 'dim' in overlay_processes:
-                overlay_processes['dim'].kill()
-                del overlay_processes['dim']
-            return
-        
-        png = build_dim_overlay_png(brightness_pct)
-        # Kill old overlay without waiting (non-blocking)
-        if 'dim' in overlay_processes:
-            overlay_processes['dim'].kill()
-            del overlay_processes['dim']
-        
-        call = [pngview_path, "-d", "0", "-b", "0x0000", "-n",
-                "-l", str(DIM_OVERLAY_LAYER), "-y", "0", "-x", "0", png]
-        overlay_processes['dim'] = subprocess.Popen(call)
-        my_logger.info(f"Spawned dim overlay at brightness {brightness_pct}%")
-    except Exception as e:
-        my_logger.error(f"spawn_dim_overlay error: {e}")
 
 def build_brightness_png(brightness_pct: int, path_out="/tmp/brightness_osd.png") -> str:
     """Compose brightness indicator PNG."""
@@ -454,14 +444,15 @@ def maybe_clear_brightness_osd():
         del overlay_processes["brightness_osd"]
 
 def change_brightness(delta: int) -> int:
-    """Change brightness by delta and update overlay. Returns new brightness."""
+    """Change brightness by delta and update tone mapping. Returns new brightness."""
     global screen_brightness
     try:
         new_brightness = max(BRIGHTNESS_MIN, min(BRIGHTNESS_MAX, screen_brightness + delta))
         my_logger.info(f"Brightness change: {screen_brightness} -> {new_brightness} (delta={delta})")
         if new_brightness != screen_brightness:
             screen_brightness = new_brightness
-            spawn_dim_overlay(screen_brightness)
+            profile = BRIGHTNESS_PROFILES.get(screen_brightness, "factory_fix")
+            set_tone_mapping_profile(profile)
         return screen_brightness
     except Exception as e:
         my_logger.error(f"change_brightness error: {e}")
