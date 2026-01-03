@@ -74,18 +74,18 @@ BRIGHTNESS_MIN = 10
 BRIGHTNESS_MAX = 100
 DIM_OVERLAY_LAYER = 10000  # below status icons (15000) but above game content
 
-# Tone mapping profiles for fbcp-ili9341
+# Tone mapping profiles for fbcp-ili9341 brightness control
 BRIGHTNESS_PROFILES = {
-    100: "off",           # Full brightness - disable tone mapping
-    90:  "punchy",        # Less dim, retains pop
+    100: "off",           # Full brightness - no tone mapping
+    90:  "bright",        # Slight dim
     80:  "factory_fix",   # Default correction
-    70:  "factory_fix",   # Default correction  
-    60:  "factory_fix",   # Default correction
-    50:  "night",         # Dark but still readable
-    40:  "night",         # Dark but still readable
-    30:  "night",         # Dark but still readable
-    20:  "night",         # Dark but still readable
-    10:  "night",         # Dark but still readable
+    70:  "medium",        # Medium dim
+    60:  "medium",        # Medium dim
+    50:  "dim",           # Noticeably dim
+    40:  "dim",           # Noticeably dim
+    30:  "night",         # Very dark
+    20:  "night",         # Very dark
+    10:  "night",         # Darkest setting
 }
 
 
@@ -120,7 +120,7 @@ def load_and_apply_config():
             pass
 
 def set_tone_mapping_profile(profile_name: str):
-    """Set fbcp-ili9341 tone mapping profile."""
+    """Set fbcp-ili9341 tone mapping profile via socket."""
     try:
         if os.path.exists(dimming_client):
             result = subprocess.run(['python3', dimming_client, 'PROFILE', profile_name], 
@@ -135,7 +135,7 @@ def set_tone_mapping_profile(profile_name: str):
         my_logger.error(f"set_tone_mapping_profile error: {e}")
 
 def apply_saved_brightness():
-    """Apply saved brightness setting at startup (call after resolution is known)."""
+    """Apply saved brightness setting at startup."""
     global screen_brightness
     if screen_brightness < 100:
         profile = BRIGHTNESS_PROFILES.get(screen_brightness, "factory_fix")

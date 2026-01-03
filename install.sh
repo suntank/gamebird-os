@@ -91,19 +91,59 @@ else
     echo "overlay.py not found in src." | tee -a "$LOG_FILE"
 fi
 
-# 4. Install fbcp-ili9341 to /usr/local/bin
-if [ -f "$SRC_DIR/fbcp-ili9341" ]; then
-    target="/usr/local/bin/fbcp-ili9341"
-    if [ ! -f "$target" ] || [ "$SRC_DIR/fbcp-ili9341" -nt "$target" ] || [ "$(stat -c%s "$SRC_DIR/fbcp-ili9341")" != "$(stat -c%s "$target")" ]; then
+# 4. Install fbcp-ili9341 binary with tone mapping support
+FBCP_BIN="$SRC_DIR/fbcp-ili9341.bin"
+FBCP_TARGET="/usr/local/bin/fbcp-ili9341"
+
+if [ -f "$FBCP_BIN" ]; then
+    if [ ! -f "$FBCP_TARGET" ] || [ "$FBCP_BIN" -nt "$FBCP_TARGET" ] || [ "$(stat -c%s "$FBCP_BIN")" != "$(stat -c%s "$FBCP_TARGET")" ]; then
         echo "Installing: fbcp-ili9341 -> /usr/local/bin" | tee -a "$LOG_FILE"
-        cp "$SRC_DIR/fbcp-ili9341" "$target"
-        chmod +x "$target"
+        
+        # Stop service before replacing binary
+        sudo systemctl stop fbcp-early.service 2>/dev/null || true
+        sleep 1
+        
+        # Backup old binary if exists
+        [ -f "$FBCP_TARGET" ] && sudo mv "$FBCP_TARGET" "$FBCP_TARGET.backup" 2>/dev/null || true
+        
+        # Install new binary
+        sudo cp "$FBCP_BIN" "$FBCP_TARGET"
+        sudo chmod +x "$FBCP_TARGET"
         echo "fbcp-ili9341 installed to /usr/local/bin" | tee -a "$LOG_FILE"
+        
+        # Restart service
+        sudo systemctl start fbcp-early.service 2>/dev/null || true
     else
         echo "Up to date: fbcp-ili9341" | tee -a "$LOG_FILE"
     fi
 else
-    echo "fbcp-ili9341 not found in src." | tee -a "$LOG_FILE"
+    echo "fbcp-ili9341.bin not found in src." | tee -a "$LOG_FILE"
+fi
+
+# 5. Copy dimming_client.py to overlay directory for brightness control
+if [ -f "$SRC_DIR/dimming_client.py" ]; then
+    target="$TARGET_OVERLAY_DIR/dimming_client.py"
+    if [ ! -f "$target" ] || [ "$SRC_DIR/dimming_client.py" -nt "$target" ] || [ "$(stat -c%s "$SRC_DIR/dimming_client.py")" != "$(stat -c%s "$target")" ]; then
+        echo "Installing: dimming_client.py -> $TARGET_OVERLAY_DIR" | tee -a "$LOG_FILE"
+        cp "$SRC_DIR/dimming_client.py" "$target"
+    else
+        echo "Up to date: dimming_client.py (overlay)" | tee -a "$LOG_FILE"
+    fi
+fi
+
+# 6. Update fbcp-early.service to set socket permissions
+FBCP_SERVICE="/etc/systemd/system/fbcp-early.service"
+if [ -f "$FBCP_SERVICE" ]; then
+    # Check if ExecStartPost for socket permissions exists
+    if ! grep -q "chmod 777 /run/fbcp-ili9341.sock" "$FBCP_SERVICE"; then
+        echo "Updating fbcp-early.service for socket permissions..." | tee -a "$LOG_FILE"
+        # Add ExecStartPost line after ExecStart if not present
+        sudo sed -i '/^ExecStart=/a ExecStartPost=/bin/bash -c "sleep 1 \&\& chmod 777 /run/fbcp-ili9341.sock"' "$FBCP_SERVICE"
+        sudo systemctl daemon-reload
+        echo "fbcp-early.service updated" | tee -a "$LOG_FILE"
+    else
+        echo "Up to date: fbcp-early.service" | tee -a "$LOG_FILE"
+    fi
 fi
 
 # # 2. Copy service files EXAMPLE
@@ -117,7 +157,7 @@ fi
 #     echo "No services to install." | tee -a "$LOG_FILE"
 # fi
 
-# 5. Log version
+# 7. Log version
 if [ -f "$REPO_DIR/.last_update_commit" ]; then
     echo "Updated to commit:" | tee -a "$LOG_FILE"
     cat "$REPO_DIR/.last_update_commit" | tee -a "$LOG_FILE"

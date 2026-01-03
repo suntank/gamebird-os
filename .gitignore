@@ -1,3 +1,8 @@
 # Updater artifacts
 update.log*
 .last_update_commit*
+
+# fbcp-ili9341 build artifacts (source kept separately)
+src/fbcp-ili9341/build/
+*.o
+*.a
