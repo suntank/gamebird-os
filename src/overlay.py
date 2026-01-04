@@ -306,12 +306,19 @@ def spawn_overlay(name, png, x, y):
 # ───────────────────────────────────────────────────────────────
 def _alsa_volume(sign_percent: str):
     """Low level call to ALSA via amixer."""
-    subprocess.call(["amixer", "-q", "sset", alsa_mixer_name, sign_percent])
+    try:
+        subprocess.call(["amixer", "-q", "sset", alsa_mixer_name, sign_percent], timeout=2)
+    except Exception as e:
+        my_logger.error(f"_alsa_volume error: {e}")
 
 def vol_get() -> int:
-    out = subprocess.check_output(["amixer", "get", alsa_mixer_name]).decode()
-    m = re.search(r"\[(\d+)%\]", out)
-    return int(m.group(1)) if m else 0
+    try:
+        out = subprocess.check_output(["amixer", "get", alsa_mixer_name], timeout=2).decode()
+        m = re.search(r"\[(\d+)%\]", out)
+        return int(m.group(1)) if m else 0
+    except Exception as e:
+        my_logger.error(f"vol_get error: {e}")
+        return 0
 
 def vol_change(delta: int) -> int:
     cur = vol_get()
