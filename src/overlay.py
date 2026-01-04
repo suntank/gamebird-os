@@ -64,8 +64,8 @@ os.makedirs(CONFIG_DIR, exist_ok=True)  # ensure directory exists
 config_path = os.path.join(CONFIG_DIR, 'overlay_config.json')
 persisted_volume_level = None
 
-# Default HUD position before loading config
-osd_position = 'bottom'    # 'top' or 'bottom'
+# HUD position - locked to top
+osd_position = 'top'
 
 # Screen brightness (100 = full bright, 10 = very dim)
 screen_brightness = 100  # percentage, default fully bright
@@ -90,18 +90,18 @@ BRIGHTNESS_PROFILES = {
 
 
 def load_config():
-    global osd_position, persisted_volume_level, screen_brightness
+    global persisted_volume_level, screen_brightness
     try:
         with open(config_path, 'r') as f:
             cfg = json.load(f)
-            osd_position = cfg.get('osd_position', osd_position)
+            # osd_position is locked to 'top', not loaded from config
             persisted_volume_level = cfg.get('volume_level')
             screen_brightness = cfg.get('screen_brightness', screen_brightness)
     except FileNotFoundError:
         pass
 
 def save_config():
-    cfg = {'osd_position': osd_position, 'volume_level': vol_get(), 'screen_brightness': screen_brightness}
+    cfg = {'volume_level': vol_get(), 'screen_brightness': screen_brightness}
     try:
         with open(config_path, 'w') as f:
             json.dump(cfg, f)
@@ -286,9 +286,6 @@ wifi_always_visible = False  # set while holding START for at least 1 second
 start_held = False
 start_pressed_at = None
 start_hud_shown = False  # track if we've already shown HUD for this START hold
-
-# Track last OSD position to force overlay respawn on position change
-last_osd_position = osd_position
 
 # Helper to spawn overlays at correct position (x, y)
 def spawn_overlay(name, png, x, y):
@@ -783,12 +780,8 @@ try:
 
         # 2. Periodic overlay updates (1 Hz)
         if now - last_status_log >= 1.0:
-            force_update = False
-            if osd_position != last_osd_position:
-                force_update = True
-                last_osd_position = osd_position
-            bat_icon, v = battery(force=force_update)
-            wst = wifi(force=force_update)
+            bat_icon, v = battery()
+            wst = wifi()
             if not update_check_started and wst == InterfaceState.CONNECTED:
                 update_check_started = True
                 threading.Thread(target=_background_update_check, daemon=True).start()
