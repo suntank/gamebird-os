@@ -133,16 +133,39 @@ fi
 
 # 6. Update fbcp-early.service to set socket permissions
 FBCP_SERVICE="/etc/systemd/system/fbcp-early.service"
+FBCP_SERVICE_MODIFIED=false
 if [ -f "$FBCP_SERVICE" ]; then
     # Check if ExecStartPost for socket permissions exists
     if ! grep -q "chmod 777 /run/fbcp-ili9341.sock" "$FBCP_SERVICE"; then
         echo "Updating fbcp-early.service for socket permissions..." | tee -a "$LOG_FILE"
         # Add ExecStartPost line after ExecStart if not present
-        sudo sed -i '/^ExecStart=/a ExecStartPost=/bin/bash -c "sleep 1 \&\& chmod 777 /run/fbcp-ili9341.sock"' "$FBCP_SERVICE"
+        sudo sed -i '/^ExecStart=/a ExecStartPost=/bin/bash -c "sleep 2 \&\& chmod 777 /run/fbcp-ili9341.sock 2>/dev/null || true"' "$FBCP_SERVICE"
         sudo systemctl daemon-reload
+        FBCP_SERVICE_MODIFIED=true
         echo "fbcp-early.service updated" | tee -a "$LOG_FILE"
     else
         echo "Up to date: fbcp-early.service" | tee -a "$LOG_FILE"
+    fi
+    
+    # Restart service if modified to apply socket permissions
+    if [ "$FBCP_SERVICE_MODIFIED" = true ]; then
+        echo "Restarting fbcp-early.service to apply socket permissions..." | tee -a "$LOG_FILE"
+        sudo systemctl restart fbcp-early.service 2>/dev/null || true
+        sleep 3
+    fi
+    
+    # Always ensure socket has correct permissions (handles previously failed installs)
+    if [ -S "/run/fbcp-ili9341.sock" ]; then
+        SOCK_PERMS=$(stat -c "%a" /run/fbcp-ili9341.sock 2>/dev/null || echo "000")
+        if [ "$SOCK_PERMS" != "777" ]; then
+            echo "Fixing socket permissions (was $SOCK_PERMS)..." | tee -a "$LOG_FILE"
+            sudo chmod 777 /run/fbcp-ili9341.sock 2>/dev/null || true
+            echo "Socket permissions fixed" | tee -a "$LOG_FILE"
+        else
+            echo "Socket permissions OK" | tee -a "$LOG_FILE"
+        fi
+    else
+        echo "WARNING: Socket /run/fbcp-ili9341.sock not found" | tee -a "$LOG_FILE"
     fi
 fi
 
