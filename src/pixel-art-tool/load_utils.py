@@ -8,7 +8,70 @@ import subprocess
 import sys
 import pygame as pg
 
+def _run_zenity_dialog(payload: dict) -> Optional[str]:
+    """Run a file dialog using zenity (native GTK, works better on Linux)."""
+    kind = payload.get('kind')
+    
+    try:
+        if kind == 'open_image':
+            cmd = [
+                'zenity', '--file-selection',
+                '--title=Load Image',
+                '--file-filter=Image files | *.png *.jpg *.jpeg *.bmp *.gif *.tga',
+                '--file-filter=All files | *',
+            ]
+        elif kind == 'save_image':
+            default_name = payload.get('default_name', 'pixel_art.png')
+            cmd = [
+                'zenity', '--file-selection', '--save',
+                '--title=Save Image',
+                f'--filename={default_name}',
+                '--file-filter=PNG files | *.png',
+                '--file-filter=All files | *',
+                '--confirm-overwrite',
+            ]
+        elif kind == 'save_export':
+            default_name = payload.get('default_name', 'pixel_art.png')
+            export_format = payload.get('export_format', 'png')
+            
+            if export_format == 'gif':
+                file_filter = '--file-filter=GIF files | *.gif'
+            elif export_format == 'zip':
+                file_filter = '--file-filter=ZIP files | *.zip'
+            else:
+                file_filter = '--file-filter=PNG files | *.png'
+            
+            cmd = [
+                'zenity', '--file-selection', '--save',
+                '--title=Export As',
+                f'--filename={default_name}',
+                file_filter,
+                '--file-filter=All files | *',
+                '--confirm-overwrite',
+            ]
+        else:
+            return None
+        
+        completed = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        
+        # zenity returns 0 on success, 1 on cancel
+        if completed.returncode == 0:
+            out = (completed.stdout or "").strip()
+            return out if out else None
+        return None
+        
+    except Exception as e:
+        print(f"Error opening file dialog: {e}")
+        return None
+
+
 def _run_tk_dialog(payload: dict) -> Optional[str]:
+    """Fallback to tkinter if zenity is not available."""
     code = (
         "import json, sys\n"
         "data = json.loads(sys.argv[1])\n"
@@ -21,10 +84,13 @@ def _run_tk_dialog(payload: dict) -> Optional[str]:
         "    root.attributes('-topmost', True)\n"
         "except Exception:\n"
         "    pass\n"
+        "root.update_idletasks()\n"
         "root.update()\n"
+        "root.focus_force()\n"
         "result = ''\n"
         "if kind == 'open_image':\n"
         "    result = filedialog.askopenfilename(\n"
+        "        parent=root,\n"
         "        title='Load Image',\n"
         "        filetypes=[\n"
         "            ('Image files', '*.png *.jpg *.jpeg *.bmp *.gif *.tga'),\n"
@@ -35,6 +101,7 @@ def _run_tk_dialog(payload: dict) -> Optional[str]:
         "    )\n"
         "elif kind == 'save_image':\n"
         "    result = filedialog.asksaveasfilename(\n"
+        "        parent=root,\n"
         "        title='Save Image',\n"
         "        initialfile=data.get('default_name', 'pixel_art.png'),\n"
         "        filetypes=[\n"
@@ -57,6 +124,7 @@ def _run_tk_dialog(payload: dict) -> Optional[str]:
         "        filetypes = [('PNG files', '*.png'), ('All files', '*.*')]\n"
         "        default_ext = '.png'\n"
         "    result = filedialog.asksaveasfilename(\n"
+        "        parent=root,\n"
         "        title='Export As',\n"
         "        initialfile=data.get('default_name', 'pixel_art.png'),\n"
         "        filetypes=filetypes,\n"
@@ -85,6 +153,16 @@ def _run_tk_dialog(payload: dict) -> Optional[str]:
 
     out = (completed.stdout or "").strip()
     return out if out else None
+
+
+def _run_file_dialog(payload: dict) -> Optional[str]:
+    """Run a file dialog, preferring zenity on Linux."""
+    import shutil
+    # Prefer zenity on Linux as it integrates better with the desktop
+    if shutil.which('zenity'):
+        return _run_zenity_dialog(payload)
+    # Fall back to tkinter
+    return _run_tk_dialog(payload)
 
 def load_image_to_canvas(image_path: str, max_width: int = 512, max_height: int = 512) -> Optional[Tuple[pg.Surface, int, int]]:
     """
@@ -137,6 +215,7 @@ def open_image_file_dialog() -> Optional[str]:
         Path to selected file or None if cancelled
     """
     try:
+        # Aggressively release pygame's input grab before showing tkinter dialog
         try:
             pg.event.set_grab(False)
         except Exception:
@@ -145,9 +224,15 @@ def open_image_file_dialog() -> Optional[str]:
             pg.mouse.set_visible(True)
         except Exception:
             pass
+        # Pump and clear all pygame events to fully release input
+        pg.event.pump()
         pg.event.clear()
-        file_path = _run_tk_dialog({"kind": "open_image"})
-        # Clear any remaining pygame events
+        # Small delay to ensure pygame releases input
+        pg.time.wait(50)
+        
+        file_path = _run_file_dialog({"kind": "open_image"})
+        # Clear any remaining pygame events after dialog closes
+        pg.event.pump()
         pg.event.clear()
 
         return file_path
@@ -168,6 +253,7 @@ def save_image_file_dialog(default_name: str = "pixel_art.png") -> Optional[str]
         Path to save file or None if cancelled
     """
     try:
+        # Aggressively release pygame's input grab before showing tkinter dialog
         try:
             pg.event.set_grab(False)
         except Exception:
@@ -176,9 +262,15 @@ def save_image_file_dialog(default_name: str = "pixel_art.png") -> Optional[str]
             pg.mouse.set_visible(True)
         except Exception:
             pass
+        # Pump and clear all pygame events to fully release input
+        pg.event.pump()
         pg.event.clear()
-        file_path = _run_tk_dialog({"kind": "save_image", "default_name": default_name})
-        # Clear any remaining pygame events
+        # Small delay to ensure pygame releases input
+        pg.time.wait(50)
+        
+        file_path = _run_file_dialog({"kind": "save_image", "default_name": default_name})
+        # Clear any remaining pygame events after dialog closes
+        pg.event.pump()
         pg.event.clear()
 
         return file_path
@@ -200,6 +292,7 @@ def save_export_file_dialog(default_name: str, export_format: str = "png") -> Op
         Path to save file or None if cancelled
     """
     try:
+        # Aggressively release pygame's input grab before showing tkinter dialog
         try:
             pg.event.set_grab(False)
         except Exception:
@@ -208,11 +301,17 @@ def save_export_file_dialog(default_name: str, export_format: str = "png") -> Op
             pg.mouse.set_visible(True)
         except Exception:
             pass
+        # Pump and clear all pygame events to fully release input
+        pg.event.pump()
         pg.event.clear()
-        file_path = _run_tk_dialog(
+        # Small delay to ensure pygame releases input
+        pg.time.wait(50)
+        
+        file_path = _run_file_dialog(
             {"kind": "save_export", "default_name": default_name, "export_format": export_format}
         )
-        # Clear any remaining pygame events
+        # Clear any remaining pygame events after dialog closes
+        pg.event.pump()
         pg.event.clear()
 
         return file_path

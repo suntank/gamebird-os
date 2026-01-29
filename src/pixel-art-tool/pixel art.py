@@ -4238,17 +4238,7 @@ def main() -> None:
                 elif event.key == pg.K_s and mods & pg.KMOD_CTRL:
                     # Save image with file dialog (Ctrl+S)
                     state.set_status("Opening save dialog...")
-                    try:
-                        pg.event.set_grab(False)
-                        pg.mouse.set_visible(True)
-                        pg.display.iconify()
-                    except Exception:
-                        pass
                     saved = save_canvas(state)  # Use file dialog
-                    try:
-                        screen = pg.display.set_mode(window_size, pg.RESIZABLE)
-                    except Exception:
-                        pass
                     if saved:
                         try:
                             rel = saved.relative_to(Path.cwd())
@@ -4368,70 +4358,66 @@ def main() -> None:
                 
                 # Handle export dialog if it's active
                 if export_dialog.active:
-                    if export_dialog.handle_mouse_down(event.pos, event.button):
-                        # Check if Save button was clicked
-                        if export_dialog.Save_button_rect.collidepoint(event.pos):
-                            # Perform export with file dialog
-                            state.set_status("Opening export dialog...")
-                            try:
-                                pg.event.set_grab(False)
-                                pg.mouse.set_visible(True)
-                                pg.display.iconify()
-                            except Exception:
-                                pass
-                            
-                            # Get all frames as surfaces
-                            frames = []
-                            for frame in state.frame_stack.frames:
-                                frames.append(frame.canvas.export_surface())
-                            
-                            # Generate default filename
-                            base_name = f"pixel_art_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                            
-                            # Determine filename based on export format
-                            if export_dialog.export_format == "gif":
-                                default_filename = f"{base_name}.gif"
-                            elif export_dialog.export_format == "zip":
-                                default_filename = f"{base_name}_frames.zip"
-                            else:  # png
-                                if export_dialog.spritesheet_mode:
-                                    default_filename = f"{base_name}_spritesheet.png"
-                                else:
-                                    default_filename = f"{base_name}.png"
-                            
-                            # Open file dialog
-                            file_path = save_export_file_dialog(default_filename, export_dialog.export_format)
-                            try:
-                                screen = pg.display.set_mode(window_size, pg.RESIZABLE)
-                            except Exception:
-                                pass
-                            
-                            if file_path:
-                                try:
-                                    filepath = Path(file_path)
-                                    
-                                    # Export based on format
-                                    if export_dialog.export_format == "gif":
-                                        export_gif(frames, filepath, export_dialog.scale, duration=100, loop=export_dialog.loop_gif)
-                                        state.set_status(f"Exported GIF: {filepath.name}")
-                                    elif export_dialog.export_format == "png":
-                                        if export_dialog.spritesheet_mode:
-                                            export_spritesheet(frames, filepath, export_dialog.scale)
-                                            state.set_status(f"Exported spritesheet: {filepath.name}")
-                                        else:
-                                            # Export current frame only
-                                            export_single_png(state.canvas.export_surface(), filepath, export_dialog.scale)
-                                            state.set_status(f"Exported PNG: {filepath.name}")
-                                    elif export_dialog.export_format == "zip":
-                                        export_zip(frames, filepath, export_dialog.scale, base_name)
-                                        state.set_status(f"Exported ZIP: {filepath.name}")
-                                    
-                                    export_dialog.close()
-                                except Exception as e:
-                                    state.set_status(f"Export failed: {str(e)}")
+                    export_dialog.handle_mouse_down(event.pos, event.button)
+                    # Check if Save button was clicked
+                    if export_dialog.Save_button_rect.collidepoint(event.pos):
+                        # Capture export settings before closing dialog
+                        export_format = export_dialog.export_format
+                        export_scale = export_dialog.scale
+                        spritesheet_mode = export_dialog.spritesheet_mode
+                        loop_gif = export_dialog.loop_gif
+                        
+                        # Get all frames as surfaces before closing
+                        frames = []
+                        for frame in state.frame_stack.frames:
+                            frames.append(frame.canvas.export_surface())
+                        
+                        # Generate default filename
+                        base_name = f"pixel_art_{_dt.datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                        
+                        # Determine filename based on export format
+                        if export_format == "gif":
+                            default_filename = f"{base_name}.gif"
+                        elif export_format == "zip":
+                            default_filename = f"{base_name}_frames.zip"
+                        else:  # png
+                            if spritesheet_mode:
+                                default_filename = f"{base_name}_spritesheet.png"
                             else:
-                                state.set_status("Export cancelled")
-                            continue
+                                default_filename = f"{base_name}.png"
+                        
+                        # Close the export menu BEFORE showing file dialog
+                        export_dialog.close()
+                        state.set_status("Opening file dialog...")
+                        
+                        # Open file dialog (now with export menu closed)
+                        file_path = save_export_file_dialog(default_filename, export_format)
+                        
+                        if file_path:
+                            try:
+                                filepath = Path(file_path)
+                                
+                                # Export based on format (using captured settings)
+                                if export_format == "gif":
+                                    export_gif(frames, filepath, export_scale, duration=100, loop=loop_gif)
+                                    state.set_status(f"Exported GIF: {filepath.name}")
+                                elif export_format == "png":
+                                    if spritesheet_mode:
+                                        export_spritesheet(frames, filepath, export_scale)
+                                        state.set_status(f"Exported spritesheet: {filepath.name}")
+                                    else:
+                                        # Export current frame only
+                                        export_single_png(frames[0], filepath, export_scale)
+                                        state.set_status(f"Exported PNG: {filepath.name}")
+                                elif export_format == "zip":
+                                    export_zip(frames, filepath, export_scale, base_name)
+                                    state.set_status(f"Exported ZIP: {filepath.name}")
+                            except Exception as e:
+                                state.set_status(f"Export failed: {str(e)}")
+                        else:
+                            state.set_status("Export cancelled")
+                    # Any click while export dialog is active should not fall through
+                    continue
                 
                 # Handle palette browser if it's active
                 if palette_browser.active:

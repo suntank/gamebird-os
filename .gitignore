@@ -6,3 +6,4 @@ update.log*
 src/fbcp-ili9341/build/
 *.o
 *.a
+pixel-art-env/*

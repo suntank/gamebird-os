@@ -26,14 +26,17 @@ class History:
         This will clear any redo history after the current position.
         
         Args:
-            state: The state to save (will be deep copied)
+            state: The state to save (will be deep copied or cloned if possible)
         """
         # Remove any states after current position (they become invalid after a new action)
         if self.current_index < len(self.states) - 1:
             self.states = self.states[:self.current_index + 1]
         
-        # Deep copy the state to prevent mutations
-        state_copy = copy.deepcopy(state)
+        # Try to use clone method if available, otherwise fall back to deepcopy
+        if hasattr(state, 'clone') and callable(getattr(state, 'clone')):
+            state_copy = state.clone()
+        else:
+            state_copy = copy.deepcopy(state)
         self.states.append(state_copy)
         
         # Maintain max size by removing oldest states
@@ -61,7 +64,12 @@ class History:
             return None
         
         self.current_index -= 1
-        return copy.deepcopy(self.states[self.current_index])
+        state = self.states[self.current_index]
+        # Try to use clone method if available, otherwise fall back to deepcopy
+        if hasattr(state, 'clone') and callable(getattr(state, 'clone')):
+            return state.clone()
+        else:
+            return copy.deepcopy(state)
     
     def redo(self) -> Optional[any]:
         """
@@ -74,12 +82,22 @@ class History:
             return None
         
         self.current_index += 1
-        return copy.deepcopy(self.states[self.current_index])
+        state = self.states[self.current_index]
+        # Try to use clone method if available, otherwise fall back to deepcopy
+        if hasattr(state, 'clone') and callable(getattr(state, 'clone')):
+            return state.clone()
+        else:
+            return copy.deepcopy(state)
     
     def current_state(self) -> Optional[any]:
         """Get the current state without modifying history."""
         if 0 <= self.current_index < len(self.states):
-            return copy.deepcopy(self.states[self.current_index])
+            state = self.states[self.current_index]
+            # Try to use clone method if available, otherwise fall back to deepcopy
+            if hasattr(state, 'clone') and callable(getattr(state, 'clone')):
+                return state.clone()
+            else:
+                return copy.deepcopy(state)
         return None
     
     def clear(self) -> None:
