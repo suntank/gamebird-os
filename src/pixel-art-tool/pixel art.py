@@ -4390,8 +4390,24 @@ def main() -> None:
                         export_dialog.close()
                         state.set_status("Opening file dialog...")
                         
+                        # Re-enable mouse interaction before opening file dialog
+                        pg.event.set_grab(False)
+                        pg.mouse.set_visible(True)
+                        pg.event.pump()
+                        pg.event.clear()
+                        pg.display.update()
+                        
+                        # Minimize pygame window to fully release mouse to the file dialog
+                        pg.display.iconify()
+                        pg.time.wait(100)
+                        
                         # Open file dialog (now with export menu closed)
                         file_path = save_export_file_dialog(default_filename, export_format)
+                        
+                        # Restore pygame window after dialog closes
+                        pg.display.set_mode(window_size, pg.RESIZABLE)
+                        pg.event.pump()
+                        pg.event.clear()
                         
                         if file_path:
                             try:
