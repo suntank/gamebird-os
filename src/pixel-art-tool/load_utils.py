@@ -215,7 +215,7 @@ def open_image_file_dialog() -> Optional[str]:
         Path to selected file or None if cancelled
     """
     try:
-        # Aggressively release pygame's input grab before showing tkinter dialog
+        # Release pygame's input grab before showing file dialog
         try:
             pg.event.set_grab(False)
         except Exception:
@@ -224,13 +224,23 @@ def open_image_file_dialog() -> Optional[str]:
             pg.mouse.set_visible(True)
         except Exception:
             pass
-        # Pump and clear all pygame events to fully release input
+        # Pump and clear all pygame events
         pg.event.pump()
         pg.event.clear()
-        # Small delay to ensure pygame releases input
-        pg.time.wait(50)
+        # Force display update
+        try:
+            pg.display.flip()
+        except Exception:
+            pass
+        # Minimize pygame window to release focus to the file dialog
+        try:
+            pg.display.iconify()
+        except Exception:
+            pass
+        pg.time.wait(100)
         
         file_path = _run_file_dialog({"kind": "open_image"})
+        
         # Clear any remaining pygame events after dialog closes
         pg.event.pump()
         pg.event.clear()
@@ -253,7 +263,7 @@ def save_image_file_dialog(default_name: str = "pixel_art.png") -> Optional[str]
         Path to save file or None if cancelled
     """
     try:
-        # Aggressively release pygame's input grab before showing tkinter dialog
+        # Release pygame's input grab before showing file dialog
         try:
             pg.event.set_grab(False)
         except Exception:
@@ -262,13 +272,23 @@ def save_image_file_dialog(default_name: str = "pixel_art.png") -> Optional[str]
             pg.mouse.set_visible(True)
         except Exception:
             pass
-        # Pump and clear all pygame events to fully release input
+        # Pump and clear all pygame events
         pg.event.pump()
         pg.event.clear()
-        # Small delay to ensure pygame releases input
-        pg.time.wait(50)
+        # Force display update
+        try:
+            pg.display.flip()
+        except Exception:
+            pass
+        # Minimize pygame window to release focus to the file dialog
+        try:
+            pg.display.iconify()
+        except Exception:
+            pass
+        pg.time.wait(100)
         
         file_path = _run_file_dialog({"kind": "save_image", "default_name": default_name})
+        
         # Clear any remaining pygame events after dialog closes
         pg.event.pump()
         pg.event.clear()
@@ -292,7 +312,7 @@ def save_export_file_dialog(default_name: str, export_format: str = "png") -> Op
         Path to save file or None if cancelled
     """
     try:
-        # Aggressively release pygame's input grab before showing tkinter dialog
+        # Release pygame's input grab before showing file dialog
         try:
             pg.event.set_grab(False)
         except Exception:
@@ -301,15 +321,25 @@ def save_export_file_dialog(default_name: str, export_format: str = "png") -> Op
             pg.mouse.set_visible(True)
         except Exception:
             pass
-        # Pump and clear all pygame events to fully release input
+        # Pump and clear all pygame events
         pg.event.pump()
         pg.event.clear()
-        # Small delay to ensure pygame releases input
-        pg.time.wait(50)
+        # Force display update
+        try:
+            pg.display.flip()
+        except Exception:
+            pass
+        # Minimize pygame window to release focus to the file dialog
+        try:
+            pg.display.iconify()
+        except Exception:
+            pass
+        pg.time.wait(100)
         
         file_path = _run_file_dialog(
             {"kind": "save_export", "default_name": default_name, "export_format": export_format}
         )
+        
         # Clear any remaining pygame events after dialog closes
         pg.event.pump()
         pg.event.clear()

@@ -17,6 +17,7 @@ from history import History
 from palette_system import Palette, PaletteManager
 from palette_browser import PaletteBrowserUI
 from export_dialog import ExportDialog
+from import_dialog import ImportDialog
 from export_utils import export_single_png, export_spritesheet, export_gif, export_zip, get_export_filename
 from resize_dialog import ResizeDialog
 from resize_utils import resize_frame_stack
@@ -3533,6 +3534,7 @@ class RightPanelUI:
         self.last_click_time: float = 0.0
         self.last_click_layer: Optional[int] = None
         self.export_button_rect = pg.Rect(0, 0, 0, 0)
+        self.import_button_rect = pg.Rect(0, 0, 0, 0)
         self.resize(window_size)
 
 
@@ -3598,6 +3600,17 @@ class RightPanelUI:
         pg.draw.rect(surface, (255, 200, 0), self.export_button_rect, border_radius=8)
         export_text = label_font.render("Export (Ctrl+E)", True, (0, 0, 0))
         surface.blit(export_text, export_text.get_rect(center=self.export_button_rect.center))
+        
+        # Import button below export button
+        self.import_button_rect = pg.Rect(
+            self.inner_left,
+            self.export_button_rect.bottom + 10,
+            inner_width,
+            50
+        )
+        pg.draw.rect(surface, CANVAS_BORDER, self.import_button_rect, border_radius=8)
+        import_text = label_font.render("Import (Ctrl+I)", True, SIDEBAR_TEXT)
+        surface.blit(import_text, import_text.get_rect(center=self.import_button_rect.center))
 
 
     def _render_minimap(self, surface: pg.Surface, state: AppState, workspace: pg.Rect) -> None:
@@ -3769,6 +3782,11 @@ class RightPanelUI:
         if button == 1:
             # Check export button
             if self.export_button_rect.collidepoint(pos):
+                # Will be handled by main loop
+                return True
+            
+            # Check import button
+            if self.import_button_rect.collidepoint(pos):
                 # Will be handled by main loop
                 return True
             
@@ -4165,6 +4183,7 @@ def main() -> None:
     palette_editor = PaletteEditorUI()
     palette_browser = PaletteBrowserUI()
     export_dialog = ExportDialog()
+    import_dialog = ImportDialog()
     resize_dialog = ResizeDialog()
     color_picker_target: Optional[str] = None  # Track if we're editing 'primary' or 'secondary'
     
@@ -4174,6 +4193,9 @@ def main() -> None:
     history.push(state.frame_stack.clone())
     # Track if canvas was modified (for history saving)
     canvas_modified = False
+    
+    # Deferred action system - to open file dialogs outside event handlers
+    pending_action = None  # Can be 'import', 'load', 'save', etc.
 
 
     clock = pg.time.Clock()
@@ -4205,6 +4227,11 @@ def main() -> None:
                 # Handle resize dialog keyboard input first
                 if resize_dialog.active:
                     resize_dialog.handle_key_down(event)
+                    continue
+                
+                # Handle import dialog keyboard input
+                if import_dialog.active:
+                    import_dialog.handle_key(event)
                     continue
                 
                 # Handle palette editor keyboard input first
@@ -4260,33 +4287,18 @@ def main() -> None:
                     # Open export dialog (Ctrl+E)
                     export_dialog.open(window_size, state.canvas.width, state.canvas.height)
                     state.set_status("Export dialog opened (Ctrl+E)")
+                elif event.key == pg.K_i and mods & pg.KMOD_CTRL:
+                    # Open import file dialog (Ctrl+I) - defer to outside event handler
+                    state.set_status("Opening file dialog...")
+                    pending_action = 'import'
                 elif event.key == pg.K_r and mods & pg.KMOD_CTRL:
                     # Open resize dialog (Ctrl+R)
                     resize_dialog.open(window_size, state.canvas.width, state.canvas.height)
                     state.set_status("Resize dialog opened (Ctrl+R)")
                 elif event.key == pg.K_l and mods & pg.KMOD_CTRL:
-                    # Load image (Ctrl+L)
+                    # Load image (Ctrl+L) - defer to outside event handler
                     state.set_status("Opening file dialog...")
-                    image_path = open_image_file_dialog()
-                    if image_path:
-                        try:
-                            result = load_image_to_canvas(image_path)
-                            if result:
-                                surface, width, height = result
-                                new_stack = create_frame_stack_from_image(surface, width, height)
-                                state.frame_stack = new_stack
-                                state.selection = None
-                                history.push(state.frame_stack.clone())
-                                filename = Path(image_path).name
-                                state.set_status(f"Loaded image: {filename} ({width}×{height})")
-                            else:
-                                state.set_status("Failed to load image")
-                        except Exception as e:
-                            print(f"\nError loading image: {e}")
-                            traceback.print_exc()
-                            state.set_status(f"Error loading image: {str(e)}")
-                    else:
-                        state.set_status("Load cancelled")
+                    pending_action = 'load'
                 elif event.key == pg.K_g:
                     state.show_grid = not state.show_grid
                     state.set_status(f"Grid {'enabled' if state.show_grid else 'disabled'}")
@@ -4444,6 +4456,92 @@ def main() -> None:
                     # Any click while export dialog is active should not fall through
                     continue
                 
+                # Handle import dialog if it's active
+                if import_dialog.active:
+                    import_dialog.handle_mouse_down(event.pos, event.button)
+                    # Check if Import button was clicked
+                    if import_dialog.import_button_rect.collidepoint(event.pos):
+                        result = import_dialog.get_import_result()
+                        if result:
+                            try:
+                                from PIL import Image
+                                img = result["image"]
+                                
+                                if result["mode"] == "single":
+                                    # Resize and import as single image
+                                    target_w = result["resize_width"]
+                                    target_h = result["resize_height"]
+                                    resample = Image.Resampling.LANCZOS if result["smooth_resize"] else Image.Resampling.NEAREST
+                                    resized = img.resize((target_w, target_h), resample)
+                                    
+                                    # Convert to pygame surface
+                                    mode = resized.mode
+                                    size = resized.size
+                                    data = resized.tobytes()
+                                    surface = pg.image.fromstring(data, size, mode)
+                                    
+                                    # Create new frame stack
+                                    new_stack = create_frame_stack_from_image(surface, target_w, target_h)
+                                    state.frame_stack = new_stack
+                                    state.selection = None
+                                    history.push(state.frame_stack.clone())
+                                    state.set_status(f"Imported image: {result['image_path'].name} ({target_w}×{target_h})")
+                                else:
+                                    # Import as spritesheet
+                                    frame_w = result["frame_width"]
+                                    frame_h = result["frame_height"]
+                                    offset_x = result["offset_x"]
+                                    offset_y = result["offset_y"]
+                                    
+                                    img_w, img_h = img.size
+                                    
+                                    # Calculate number of frames
+                                    cols = max(1, (img_w - offset_x) // frame_w)
+                                    rows = max(1, (img_h - offset_y) // frame_h)
+                                    
+                                    # Create new frame stack with first frame
+                                    first_frame = img.crop((offset_x, offset_y, offset_x + frame_w, offset_y + frame_h))
+                                    mode = first_frame.mode
+                                    size = first_frame.size
+                                    data = first_frame.tobytes()
+                                    first_surface = pg.image.fromstring(data, size, mode)
+                                    new_stack = create_frame_stack_from_image(first_surface, frame_w, frame_h)
+                                    
+                                    # Add remaining frames
+                                    for row in range(rows):
+                                        for col in range(cols):
+                                            if row == 0 and col == 0:
+                                                continue  # Skip first frame, already added
+                                            x = offset_x + col * frame_w
+                                            y = offset_y + row * frame_h
+                                            if x + frame_w <= img_w and y + frame_h <= img_h:
+                                                frame_img = img.crop((x, y, x + frame_w, y + frame_h))
+                                                frame_data = frame_img.tobytes()
+                                                frame_surface = pg.image.fromstring(frame_data, (frame_w, frame_h), mode)
+                                                # Add new frame to stack
+                                                new_stack.add_blank_frame()
+                                                new_frame = new_stack.frames[-1]
+                                                # Copy pixels to new frame
+                                                for py in range(frame_h):
+                                                    for px in range(frame_w):
+                                                        color = frame_surface.get_at((px, py))
+                                                        new_frame.canvas.set_pixel(px, py, tuple(color))
+                                    
+                                    state.frame_stack = new_stack
+                                    state.selection = None
+                                    history.push(state.frame_stack.clone())
+                                    num_frames = cols * rows
+                                    state.set_status(f"Imported spritesheet: {num_frames} frames ({frame_w}×{frame_h})")
+                                
+                                import_dialog.close()
+                            except Exception as e:
+                                print(f"Import error: {e}")
+                                import traceback
+                                traceback.print_exc()
+                                state.set_status(f"Import failed: {str(e)}")
+                                import_dialog.close()
+                    continue
+                
                 # Handle palette browser if it's active
                 if palette_browser.active:
                     result = palette_browser.handle_mouse_down(event.pos, palette_manager)
@@ -4508,13 +4606,18 @@ def main() -> None:
                     if right_panel.export_button_rect.collidepoint(event.pos) and event.button == 1:
                         export_dialog.open(window_size, state.canvas.width, state.canvas.height)
                         state.set_status("Export dialog opened")
+                    # Check if import button was clicked
+                    elif right_panel.import_button_rect.collidepoint(event.pos) and event.button == 1:
+                        # Defer file dialog to outside event handler
+                        state.set_status("Opening file dialog...")
+                        pending_action = 'import'
                     else:
                         # Layer operations (add, delete, reorder, visibility) occurred
                         history.push(state.frame_stack.clone())
                     continue
                 
                 # Don't allow canvas interaction if any modal is open
-                if resize_dialog.active or export_dialog.active or palette_editor.active or palette_browser.active or color_picker.active:
+                if resize_dialog.active or export_dialog.active or import_dialog.active or palette_editor.active or palette_browser.active or color_picker.active:
                     continue
                 
                 cell = cell_from_pos(state, event.pos)
@@ -4532,6 +4635,9 @@ def main() -> None:
                     continue
                 if export_dialog.active:
                     export_dialog.handle_mouse_up(event.pos)
+                    continue
+                if import_dialog.active:
+                    import_dialog.handle_mouse_up(event.pos)
                     continue
                 if palette_browser.active:
                     palette_browser.handle_mouse_up(event.pos)
@@ -4556,6 +4662,9 @@ def main() -> None:
                 if export_dialog.active:
                     export_dialog.handle_mouse_move(event.pos)
                     continue
+                if import_dialog.active:
+                    import_dialog.handle_mouse_move(event.pos)
+                    continue
                 if palette_browser.active:
                     palette_browser.handle_mouse_move(event.pos)
                     continue
@@ -4578,6 +4687,83 @@ def main() -> None:
                     window_size,
                 )
 
+        # Process deferred actions (file dialogs) outside event handler
+        if pending_action == 'import':
+            pending_action = None
+            # Force full render and display update before dialog
+            screen.fill(WINDOW_BG)
+            renderer.draw_canvas(state, tool_manager)
+            frames_panel.render(screen, fonts, state)
+            sidebar.render(screen, fonts, state, tool_manager.active_name)
+            right_panel.render(screen, fonts, state, workspace)
+            renderer.draw_status(state, tool_manager.active_name)
+            pg.display.flip()
+            
+            # Release mouse and minimize window (same as export)
+            pg.event.set_grab(False)
+            pg.mouse.set_visible(True)
+            pg.event.pump()
+            pg.event.clear()
+            pg.display.iconify()
+            pg.time.wait(100)
+            
+            image_path = open_image_file_dialog()
+            
+            # Restore pygame window after file dialog closes
+            pg.display.set_mode(window_size, pg.RESIZABLE)
+            pg.event.pump()
+            pg.event.clear()
+            
+            if image_path:
+                if import_dialog.open(window_size, Path(image_path)):
+                    state.set_status("Import dialog opened")
+                else:
+                    state.set_status("Failed to load image for import")
+            else:
+                state.set_status("Import cancelled")
+        elif pending_action == 'load':
+            pending_action = None
+            # Force full render and display update before dialog
+            screen.fill(WINDOW_BG)
+            renderer.draw_canvas(state, tool_manager)
+            frames_panel.render(screen, fonts, state)
+            sidebar.render(screen, fonts, state, tool_manager.active_name)
+            right_panel.render(screen, fonts, state, workspace)
+            renderer.draw_status(state, tool_manager.active_name)
+            pg.display.flip()
+            
+            # Release mouse and minimize window (same as export)
+            pg.event.set_grab(False)
+            pg.mouse.set_visible(True)
+            pg.event.pump()
+            pg.event.clear()
+            pg.display.iconify()
+            pg.time.wait(100)
+            
+            image_path = open_image_file_dialog()
+            
+            # Restore pygame window after file dialog closes
+            pg.display.set_mode(window_size, pg.RESIZABLE)
+            pg.event.pump()
+            pg.event.clear()
+            
+            if image_path:
+                try:
+                    result = load_image_to_canvas(image_path)
+                    if result:
+                        surface, width, height = result
+                        new_stack = create_frame_stack_from_image(surface, width, height)
+                        state.frame_stack = new_stack
+                        state.selection = None
+                        history.push(state.frame_stack.clone())
+                        state.center_canvas(window_size)
+                        state.set_status(f"Loaded: {Path(image_path).name}")
+                    else:
+                        state.set_status("Failed to load image")
+                except Exception as e:
+                    state.set_status(f"Load failed: {str(e)}")
+            else:
+                state.set_status("Load cancelled")
 
         screen.fill(WINDOW_BG)
         renderer.draw_canvas(state, tool_manager)
@@ -4593,7 +4779,9 @@ def main() -> None:
         palette_browser.render(screen, fonts)
         # Render export dialog on top of everything
         export_dialog.render(screen, fonts)
-        # Render resize dialog on top of export dialog
+        # Render import dialog on top of export dialog
+        import_dialog.render(screen, fonts)
+        # Render resize dialog on top of import dialog
         resize_dialog.render(screen, fonts)
         pg.display.flip()
 
