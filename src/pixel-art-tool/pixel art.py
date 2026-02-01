@@ -4459,79 +4459,53 @@ def main() -> None:
                 # Handle import dialog if it's active
                 if import_dialog.active:
                     import_dialog.handle_mouse_down(event.pos, event.button)
-                    # Check if Import button was clicked
-                    if import_dialog.import_button_rect.collidepoint(event.pos):
+                    # Check if Combine or Replace button was clicked (in preview stage)
+                    if import_dialog.is_action_clicked(event.pos):
                         result = import_dialog.get_import_result()
-                        if result:
+                        if result and result["frames"]:
                             try:
-                                from PIL import Image
-                                img = result["image"]
+                                frames = result["frames"]
+                                action = result["action"]
+                                frame_w, frame_h = frames[0].size
                                 
-                                if result["mode"] == "single":
-                                    # Resize and import as single image
-                                    target_w = result["resize_width"]
-                                    target_h = result["resize_height"]
-                                    resample = Image.Resampling.LANCZOS if result["smooth_resize"] else Image.Resampling.NEAREST
-                                    resized = img.resize((target_w, target_h), resample)
-                                    
-                                    # Convert to pygame surface
-                                    mode = resized.mode
-                                    size = resized.size
-                                    data = resized.tobytes()
-                                    surface = pg.image.fromstring(data, size, mode)
-                                    
-                                    # Create new frame stack
-                                    new_stack = create_frame_stack_from_image(surface, target_w, target_h)
-                                    state.frame_stack = new_stack
-                                    state.selection = None
-                                    history.push(state.frame_stack.clone())
-                                    state.set_status(f"Imported image: {result['image_path'].name} ({target_w}×{target_h})")
-                                else:
-                                    # Import as spritesheet
-                                    frame_w = result["frame_width"]
-                                    frame_h = result["frame_height"]
-                                    offset_x = result["offset_x"]
-                                    offset_y = result["offset_y"]
-                                    
-                                    img_w, img_h = img.size
-                                    
-                                    # Calculate number of frames
-                                    cols = max(1, (img_w - offset_x) // frame_w)
-                                    rows = max(1, (img_h - offset_y) // frame_h)
-                                    
-                                    # Create new frame stack with first frame
-                                    first_frame = img.crop((offset_x, offset_y, offset_x + frame_w, offset_y + frame_h))
+                                if action == "replace":
+                                    # Replace current sprite with imported frames
+                                    first_frame = frames[0]
                                     mode = first_frame.mode
-                                    size = first_frame.size
                                     data = first_frame.tobytes()
-                                    first_surface = pg.image.fromstring(data, size, mode)
+                                    first_surface = pg.image.fromstring(data, (frame_w, frame_h), mode)
                                     new_stack = create_frame_stack_from_image(first_surface, frame_w, frame_h)
                                     
                                     # Add remaining frames
-                                    for row in range(rows):
-                                        for col in range(cols):
-                                            if row == 0 and col == 0:
-                                                continue  # Skip first frame, already added
-                                            x = offset_x + col * frame_w
-                                            y = offset_y + row * frame_h
-                                            if x + frame_w <= img_w and y + frame_h <= img_h:
-                                                frame_img = img.crop((x, y, x + frame_w, y + frame_h))
-                                                frame_data = frame_img.tobytes()
-                                                frame_surface = pg.image.fromstring(frame_data, (frame_w, frame_h), mode)
-                                                # Add new frame to stack
-                                                new_stack.add_blank_frame()
-                                                new_frame = new_stack.frames[-1]
-                                                # Copy pixels to new frame
-                                                for py in range(frame_h):
-                                                    for px in range(frame_w):
-                                                        color = frame_surface.get_at((px, py))
-                                                        new_frame.canvas.set_pixel(px, py, tuple(color))
+                                    for i, frame in enumerate(frames[1:], 1):
+                                        new_stack.add_frame()
+                                        new_frame = new_stack.frames[-1]
+                                        frame_data = frame.tobytes()
+                                        frame_surface = pg.image.fromstring(frame_data, (frame_w, frame_h), mode)
+                                        for py in range(frame_h):
+                                            for px in range(frame_w):
+                                                color = frame_surface.get_at((px, py))
+                                                new_frame.canvas.set_pixel(px, py, tuple(color))
                                     
                                     state.frame_stack = new_stack
                                     state.selection = None
                                     history.push(state.frame_stack.clone())
-                                    num_frames = cols * rows
-                                    state.set_status(f"Imported spritesheet: {num_frames} frames ({frame_w}×{frame_h})")
+                                    state.center_canvas(window_size)
+                                    state.set_status(f"Replaced with {len(frames)} frames ({frame_w}×{frame_h})")
+                                else:
+                                    # Combine - add imported frames to current sprite
+                                    for frame in frames:
+                                        frame_data = frame.tobytes()
+                                        frame_surface = pg.image.fromstring(frame_data, (frame_w, frame_h), frame.mode)
+                                        state.frame_stack.add_frame()
+                                        new_frame = state.frame_stack.frames[-1]
+                                        for py in range(min(frame_h, new_frame.canvas.height)):
+                                            for px in range(min(frame_w, new_frame.canvas.width)):
+                                                color = frame_surface.get_at((px, py))
+                                                new_frame.canvas.set_pixel(px, py, tuple(color))
+                                    
+                                    history.push(state.frame_stack.clone())
+                                    state.set_status(f"Combined {len(frames)} frames")
                                 
                                 import_dialog.close()
                             except Exception as e:
