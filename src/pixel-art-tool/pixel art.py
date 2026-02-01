@@ -1988,19 +1988,28 @@ class FramesPanelUI:
                 self.scroll_offset = int(scroll_ratio * self.max_scroll)
                 return True
             
-            for entry in entries:
-                if entry.rect.collidepoint(pos):
-                    # Start dragging
-                    self.dragging_frame = entry.index
-                    self.drag_offset_y = pos[1] - entry.rect.top
-                    state.select_frame(entry.index, window_size)
-                    return True
+            # Check control buttons BEFORE frame entries to prevent overlap issues
             for ctrl in controls:
                 if ctrl.rect.collidepoint(pos):
                     if ctrl.name == "dup":
                         state.duplicate_frame(window_size)
                     elif ctrl.name == "del":
                         state.delete_frame(window_size)
+                    return True
+            
+            # Calculate clip area for frame entries (same as render)
+            list_top = fps_slider_rect.bottom + 18
+            clip_bottom = controls[0].rect.top if controls else self.rect.bottom
+            
+            for entry in entries:
+                # Only allow clicking entries within the visible scroll area
+                if entry.rect.bottom < list_top or entry.rect.top > clip_bottom:
+                    continue
+                if entry.rect.collidepoint(pos):
+                    # Start dragging
+                    self.dragging_frame = entry.index
+                    self.drag_offset_y = pos[1] - entry.rect.top
+                    state.select_frame(entry.index, window_size)
                     return True
             if add_rect.collidepoint(pos):
                 state.add_blank_frame(window_size)
